@@ -4,10 +4,10 @@ A local, single-user RAG application for exam preparation. Upload your study
 material and past question papers, then generate practice MCQs and discover the
 questions that keep coming back.
 
-> **Status:** Phase 1 Tasks 1–3 are complete: project foundation, the database
-> schema, and document loading with normalization into Markdown. Chunking,
-> embeddings, the upload endpoint, retrieval, MCQ generation and FAQ analysis
-> are not implemented yet.
+> **Status:** Phase 1 Tasks 1–4 are complete: project foundation, the database
+> schema, document loading with normalization into Markdown, and cleaning plus
+> chunking. Embeddings, the upload endpoint, retrieval, MCQ generation and FAQ
+> analysis are not implemented yet.
 
 ## Features
 

@@ -177,3 +177,64 @@ levels. Because chunking consumes headings as metadata rather than as control
 flow, a wrong level degrades attribution quality without breaking ingestion.
 
 **Date:** 2026-08-16
+
+---
+
+## Chunking is structure-aware, not a fixed window
+
+**Decision:** `chunker.py` splits on document structure — a heading starts a new
+chunk, and the heading path is recorded on every chunk beneath it — rather than
+sliding a fixed character window over the text.
+
+**Reason:** Two later requirements depend on it. Retrieved chunks must be
+traceable to a source, and a heading breadcrumb plus page number says where a
+passage came from far better than an offset. And Phase 2 must distribute
+"all topics" MCQ generation across document sections rather than generating
+every question from one global top-k context, which requires knowing where
+sections begin. A fixed window would have to reconstruct that later from text
+that no longer contains it.
+
+Chunks still carry a size target and a sentence-aligned overlap, so structure
+determines the boundaries while size keeps them retrievable.
+
+**Date:** 2026-08-16
+
+---
+
+## Chunk sizing lives in code, tied to the chunker version
+
+**Decision:** `TARGET_CHUNK_CHARS`, `MAX_CHUNK_CHARS`, `MIN_CHUNK_CHARS` and
+`OVERLAP_CHARS` are constants in `chunker.py`, not environment variables, and
+`CHUNKER_VERSION` covers them.
+
+**Reason:** Same reasoning as the embedding dimensionality. These values are
+baked into every stored chunk; changing one makes existing chunks inconsistent
+with new ones, and the fix is re-ingestion, not a restart. `chunker_version` is
+stored per document precisely so that mismatch is detectable, which only works
+if the version changes when the values do. Retrieval *tuning* parameters are
+different — those are read at query time, affect nothing stored, and Phase 2
+exposes them as environment variables as the specification requires.
+
+**Date:** 2026-08-16
+
+---
+
+## Reflowing wrapped prose is the cleaner's job, not the converter's
+
+**Decision:** `pdf_to_markdown` joins the lines of a paragraph with newlines,
+preserving the source line breaks. `markdown_cleaner` then rejoins hyphenated
+words and reflows the paragraph into continuous prose.
+
+**Reason:** The first implementation had the converter join lines with spaces,
+which read correctly but destroyed the information the cleaner needs: a word
+split as `phys-\nical` can only be rejoined while the newline is still there,
+and a page number is only recognisable as an artefact while it is still on its
+own line. The end-to-end composition test caught this — both unit test suites
+passed while the combination silently produced `phys- ical` and embedded page
+numbers as content.
+
+Keeping extraction and normalization in separate stages also matches the module
+boundaries: the converter reports what the PDF contains, the cleaner decides
+what is worth keeping.
+
+**Date:** 2026-08-16

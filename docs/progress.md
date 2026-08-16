@@ -44,13 +44,25 @@ Task 3 — Document loading and Markdown normalization (2026-08-16)
 - [x] `DocumentLoadError` and `UnsupportedDocumentTypeError` for the upload endpoint
 - [x] 42 tests building real PDF and DOCX files — 77 passing in total
 
+Task 4 — Markdown cleaning and chunking (2026-08-16)
+
+- [x] Dehyphenation across line breaks, including across separate text blocks
+- [x] Reflow of prose wrapped mid-sentence, preserving structural line breaks
+- [x] Page-number, control-character and exotic-space removal
+- [x] Running header/footer detection by comparing pages
+- [x] Fenced code blocks passed through untouched
+- [x] Structure-aware chunking with heading breadcrumbs and page numbers
+- [x] Sentence-aligned overlap, oversized-block splitting, short-chunk merging
+- [x] `CHUNKER_VERSION` recorded so stale chunks stay detectable
+- [x] End-to-end composition test over a real PDF
+- [x] 47 new tests — 124 passing in total
+
 ### In Progress
 
-- [ ] Task 4 — Markdown cleaning and chunking
+- [ ] Task 5 — embedding generation and vector storage
 
 ### Not Started
 
-- [ ] Task 5 — embedding generation and vector storage
 - [ ] Task 6 — upload endpoint, ingestion jobs, background processing, duplicate protection
 - [ ] Task 7 — frontend upload UI and status polling
 
@@ -67,6 +79,14 @@ Task 3 — Document loading and Markdown normalization (2026-08-16)
   `DocumentLoadError` for undecodable text is a narrow case (Task 3).
 - PyMuPDF ships incomplete type annotations, so `pdf_to_markdown` needs a
   narrow mypy override for untyped calls (Task 3).
+- The end-to-end composition test found two integration bugs the unit tests
+  missed: the PDF renderer joined paragraph lines with spaces, which destroyed
+  the line structure the cleaner needs to dehyphenate and to spot page numbers;
+  and chunk overlap could push a chunk past `MAX_CHUNK_CHARS`. Both fixed in
+  Task 4.
+- Header detection originally took the first and last two lines of each page,
+  which overlap on a short page and deleted mid-page content. The slices are
+  now capped so they can never meet (Task 4).
 
 ### Decisions
 
@@ -82,3 +102,5 @@ Recorded in [decisions.md](decisions.md):
 - Documents unique per `(file hash, purpose)`
 - Markdown as the normalized representation, with page numbers preserved
 - Heading inference from font metrics for PDF, explicit styles for DOCX
+- Structure-aware chunking with heading breadcrumbs
+- Chunk sizing as code constants tied to `CHUNKER_VERSION`

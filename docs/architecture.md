@@ -29,7 +29,7 @@ state in PostgreSQL.
 | `database/` | Async engine, session factory, declarative `Base`, ORM models | Connection layer and models implemented |
 | `enums.py` | Domain enumerations shared by models, schemas and API | Implemented |
 | `schemas/` | Pydantic request/response models | `health.py` implemented |
-| `ingestion/` | Loading, Markdown normalization, cleaning, chunking | Loading and conversion implemented |
+| `ingestion/` | Loading, Markdown normalization, cleaning, chunking | Implemented through chunking |
 | `embeddings/` | Embedding generation | Phase 1, later tasks |
 | `retrieval/` | `base`, `vector_search`, `keyword_search`, `fusion`, `reranker` | Phase 2 |
 | `rag/` | Orchestration: pipeline and context building | Phase 2 |
@@ -58,7 +58,7 @@ metadata.
 
 ```text
 PDF ──► pdf_to_markdown  ─┐
-DOCX ─► docx_to_markdown ─┼─► LoadedDocument(pages: [DocumentPage]) ─► cleaning ─► chunking
+DOCX ─► docx_to_markdown ─┼─► LoadedDocument ─► markdown_cleaner ─► chunker ─► [TextChunk]
 MD/TXT ───────────────────┘
 ```
 
@@ -81,6 +81,45 @@ without pagination (DOCX, Markdown, TXT) produce a single page with
 Failures raise `DocumentLoadError`, or `UnsupportedDocumentTypeError` for an
 extension outside PDF/DOCX/MD/TXT — the two exceptions the upload endpoint will
 translate into responses.
+
+### Cleaning
+
+`markdown_cleaner.py` removes what conversion leaves behind, so artefacts are
+never embedded as if they were content:
+
+- words hyphenated across a line break are rejoined, including when the halves
+  land in separate text blocks
+- prose wrapped mid-sentence is reflowed; headings, list items, table rows and
+  quotes keep their line breaks because those breaks carry meaning
+- page-number lines, control characters and exotic spaces are dropped
+- a running header or footer is detected by comparing pages and removed
+
+Header detection only considers lines at the top and bottom of a page, and the
+head and tail slices never overlap, so mid-page content is never mistaken for a
+header on a short page. It needs at least three pages before it will act.
+
+Fenced code blocks pass through untouched, since whitespace is significant
+inside them.
+
+### Chunking
+
+`chunker.py` produces `TextChunk` values — index, content, page number and
+heading breadcrumb — using structure rather than a fixed window:
+
+- a heading starts a new chunk, so a section's content never leaks into the
+  previous one
+- the heading path is recorded as a breadcrumb (`OSI Model > Physical Layer`),
+  which is what Phase 2 uses to spread all-topics MCQ generation across
+  sections instead of over one global context
+- a heading with no content of its own is folded into the following chunk
+- consecutive chunks overlap by `OVERLAP_CHARS`, cut on a sentence boundary
+- oversized blocks split on sentences, then hard-split if they still do not fit
+- chunks below `MIN_CHUNK_CHARS` merge into their neighbour, but only under the
+  same heading
+
+`CHUNKER_VERSION` identifies the strategy and is stored per document, so chunks
+produced by an older version stay detectable. It must be bumped whenever the
+algorithm or any of its size constants change.
 
 ## Data model
 

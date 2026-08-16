@@ -128,7 +128,10 @@ def _render(blocks: list[list[_Line]], body_size: float) -> str:
 
     def flush() -> None:
         if paragraph:
-            parts.append(" ".join(paragraph))
+            # Joined with newlines, not spaces: the cleaner still needs the
+            # source line breaks to rejoin hyphenated words and to recognise
+            # page-number lines. It reflows the paragraph afterwards.
+            parts.append("\n".join(paragraph))
             paragraph.clear()
 
     for lines in blocks:
