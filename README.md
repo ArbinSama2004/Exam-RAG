@@ -4,8 +4,10 @@ A local, single-user RAG application for exam preparation. Upload your study
 material and past question papers, then generate practice MCQs and discover the
 questions that keep coming back.
 
-> **Status:** Phase 1, Task 1 (project foundation) is complete. Document
-> ingestion, retrieval, MCQ generation and FAQ analysis are not implemented yet.
+> **Status:** Phase 1 Tasks 1–2 are complete: project foundation and the
+> database schema for documents, ingestion jobs and chunks. Document loading,
+> chunking, embeddings, retrieval, MCQ generation and FAQ analysis are not
+> implemented yet.
 
 ## Features
 
@@ -105,6 +107,10 @@ make lint           # Ruff + TypeScript
 make typecheck      # mypy
 make check          # all of the above
 ```
+
+Tests that need PostgreSQL are skipped automatically when no database is
+reachable, so `make test` works without Docker. Run `make up` first to include
+them. Override the connection with `TEST_DATABASE_URL` if needed.
 
 ## Project structure
 

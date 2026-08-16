@@ -60,6 +60,70 @@ migrations.
 
 ---
 
+## Embeddings are a column on `chunks`, not a separate table
+
+**Decision:** Store the vector as `chunks.embedding vector(384)` rather than in
+a `chunk_embeddings` table.
+
+**Reason:** The application stores exactly one vector per chunk with one model
+at a time, so a separate table would add a join to every retrieval query
+without modelling anything the schema does not already express. Keeping the
+vector beside the text and its metadata lets vector search, keyword search and
+context building read a single row. If multiple embedding models ever need to
+coexist, the vector moves to its own table then — that is a migration, not a
+redesign of the retrieval layer.
+
+**Date:** 2026-08-16
+
+---
+
+## `content_tsv` is a database-generated column
+
+**Decision:** `chunks.content_tsv` is
+`GENERATED ALWAYS AS (to_tsvector('english', content)) STORED`, with a GIN
+index, rather than a value the application writes.
+
+**Reason:** Keyword search cannot drift from the text it indexes — PostgreSQL
+recomputes the vector on every insert and update, so there is no path where an
+edited chunk keeps a stale search vector. It also keeps the ingestion code
+free of indexing concerns.
+
+**Date:** 2026-08-16
+
+---
+
+## Embedding dimensionality is a code constant, not a setting
+
+**Decision:** `EMBEDDING_DIMENSIONS = 384` lives in `database/models.py` and is
+mirrored in migration `0002`, instead of being read from the environment.
+
+**Reason:** The column type is fixed in the database. Changing the number means
+a migration plus re-embedding every stored chunk, so exposing it as an
+environment variable would suggest a flexibility that does not exist and would
+let a mismatched value fail at query time instead of at review time. The
+`embedding_model` recorded per document is what makes a model change
+detectable.
+
+**Date:** 2026-08-16
+
+---
+
+## Documents are unique per `(original_file_hash, purpose)`
+
+**Decision:** The uniqueness constraint covers the file hash together with the
+document purpose, not the hash alone.
+
+**Reason:** The specification requires that re-uploading an unchanged file does
+not trigger redundant embedding generation, and this constraint enforces that
+for the case that matters. Including `purpose` still allows the same file to be
+registered as both study material and a past paper, which the hash-only
+constraint would block — a real scenario, since the two purposes feed different
+pipelines.
+
+**Date:** 2026-08-16
+
+---
+
 ## Dependencies are added when the feature that uses them lands
 
 **Decision:** Only FastAPI, Uvicorn, Pydantic v2, pydantic-settings,
