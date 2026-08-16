@@ -4,14 +4,14 @@ A local, single-user RAG application for exam preparation. Upload your study
 material and past question papers, then generate practice MCQs and discover the
 questions that keep coming back.
 
-> **Status:** Phase 1 Tasks 1–6 are complete. Documents can be uploaded through
-> the API and are ingested end to end into PostgreSQL + pgvector. The frontend
-> upload UI, retrieval, MCQ generation and FAQ analysis are not implemented yet.
+> **Status: Phase 1 is complete.** Upload a document in the browser and watch it
+> convert, chunk, embed and index into PostgreSQL + pgvector. Retrieval, MCQ
+> generation and FAQ analysis arrive in Phases 2 and 3.
 
 ## Features
 
 - **Document upload** — PDF, DOCX, Markdown and TXT, each classified as
-  `STUDY_MATERIAL` or `PAST_PAPER` *(Phase 1)*
+  `STUDY_MATERIAL` or `PAST_PAPER`, with live ingestion progress *(done)*
 - **MCQ generator** — RAG-grounded practice quizzes with scoring and review
   *(Phase 2)*
 - **Past paper FAQ generator** — finds semantically repeated exam questions and
@@ -122,7 +122,7 @@ Set `POSTGRES_HOST=localhost` in `.env` when the backend runs outside Docker.
 ## How to run tests
 
 ```bash
-make test           # pytest
+make test           # backend pytest + frontend vitest
 make lint           # Ruff + TypeScript
 make typecheck      # mypy
 make check          # all of the above

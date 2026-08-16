@@ -342,3 +342,43 @@ to raise to. The pipeline rolls back first, so a half-finished run cannot leave
 chunks that retrieval would return.
 
 **Date:** 2026-08-16
+
+---
+
+## Ingestion status is polled, and polling continues in the background
+
+**Decision:** `IngestionProgress` polls `GET /documents/{id}/status` every
+second, stops as soon as the status is `READY` or `FAILED`, and sets
+`refetchIntervalInBackground: true`.
+
+**Reason:** Polling suits a local single-user application — the specification
+asks for it, and it needs no WebSocket, no server-sent events and no extra
+state on either side. Stopping at a terminal status matters because the
+alternative is a page that queries the backend forever after the work is done.
+
+Background polling is not optional here: TanStack Query pauses interval
+refetching while the window is unfocused, and this app disables
+refetch-on-focus, so a user who switched tabs during a long PDF came back to a
+progress list frozen at whatever stage it had reached. That was observed in the
+browser, not reasoned about.
+
+**Date:** 2026-08-16
+
+---
+
+## The frontend is tested with Vitest and Testing Library
+
+**Decision:** Add Vitest, Testing Library and jsdom, and test the upload form,
+progress polling and document list against a stubbed `fetch`.
+
+**Reason:** With Task 7 the frontend stopped being a placeholder: it decides
+when an upload may be submitted, when to stop polling, and how to present
+failures. Those are the behaviours a user actually depends on, and none of them
+are covered by the backend suite. Testing against a stubbed `fetch` rather than
+a running backend keeps the suite fast and makes error paths — a rejected
+upload, an unreachable backend, a failed ingestion — easy to reproduce.
+
+Vitest shares Vite's config and transform pipeline, so this adds a test runner
+rather than a second build system.
+
+**Date:** 2026-08-16

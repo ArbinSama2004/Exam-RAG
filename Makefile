@@ -19,6 +19,7 @@ migrate:
 
 test:
 	cd backend && uv run pytest
+	cd frontend && npm test
 
 format:
 	cd backend && uv run ruff format .

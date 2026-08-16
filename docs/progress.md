@@ -127,6 +127,12 @@ Task 6 — Upload endpoint, jobs, background processing, duplicates (2026-08-16)
 - PostgreSQL's `now()` is the transaction start time, so rows written in one
   transaction share a `created_at`. Only affects tests; each real upload has
   its own transaction (Task 6).
+- Ingestion progress froze in the browser: TanStack Query pauses
+  `refetchInterval` while the window is unfocused, and this app disables
+  refetch-on-focus. Fixed with `refetchIntervalInBackground` (Task 7).
+- Testing Library's `upload` honours the input's `accept` attribute, so a test
+  that expected the backend to reject a `.pptx` never got that far. The picker
+  filters it first; the test now covers a real backend rejection (Task 7).
 
 ### Decisions
 
@@ -148,3 +154,4 @@ Recorded in [decisions.md](decisions.md):
 - Chunk writes centralized in `vector_store`, replacing rather than appending
 - Duplicate uploads reused, failed ones retried in place
 - Ingestion progress committed per stage so polling is meaningful
+- Frontend polls in the background and stops at a terminal status
