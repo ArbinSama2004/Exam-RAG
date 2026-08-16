@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Node
+node_modules/
+dist/
+
+# Environment
+.env
+
+# Uploaded documents (kept out of version control)
+data/uploads/*
+!data/uploads/.gitkeep
+
+# OS / editors
+.DS_Store
+.idea/
+.vscode/
+*.tsbuildinfo

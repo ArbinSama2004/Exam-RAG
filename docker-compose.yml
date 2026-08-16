@@ -1,0 +1,63 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    container_name: examrag-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-examrag}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-examrag}
+      POSTGRES_DB: ${POSTGRES_DB:-examrag}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-examrag} -d ${POSTGRES_DB:-examrag}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+    container_name: examrag-backend
+    environment:
+      APP_ENV: ${APP_ENV:-local}
+      DEBUG: ${DEBUG:-false}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:-examrag}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-examrag}
+      POSTGRES_DB: ${POSTGRES_DB:-examrag}
+      UPLOAD_DIR: /data/uploads
+    command: >
+      sh -c "alembic upgrade head &&
+             uvicorn examrag.main:app --host 0.0.0.0 --port 8000 --reload"
+    ports:
+      - "${API_PORT:-8000}:8000"
+    volumes:
+      - ./backend/src:/app/src
+      - ./backend/alembic:/app/alembic
+      - ./backend/tests:/app/tests
+      - ./data/uploads:/data/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+    container_name: examrag-frontend
+    environment:
+      VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8000}
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    volumes:
+      - ./frontend/src:/app/src
+      - ./frontend/index.html:/app/index.html
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:
