@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from examrag.config import Settings, get_settings
 from examrag.database.connection import get_session
+from examrag.generation.llm_client import check_llm_available
 from examrag.schemas.health import HealthResponse, ReadinessResponse
 
 logger = logging.getLogger(__name__)
@@ -33,10 +34,23 @@ async def readiness(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> ReadinessResponse:
     """Report whether the database is reachable."""
+    llm_ok, llm_detail = await check_llm_available()
+
     try:
         await session.execute(text("SELECT 1"))
     except SQLAlchemyError:
         logger.exception("Readiness check failed: database is unreachable")
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
-        return ReadinessResponse(status="not_ready", database="unavailable")
-    return ReadinessResponse(status="ready", database="ok")
+        return ReadinessResponse(
+            status="not_ready",
+            database="unavailable",
+            llm="ok" if llm_ok else "unavailable",
+            llm_detail=llm_detail,
+        )
+
+    return ReadinessResponse(
+        status="ready",
+        database="ok",
+        llm="ok" if llm_ok else "unavailable",
+        llm_detail=llm_detail,
+    )

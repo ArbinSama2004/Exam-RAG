@@ -10,6 +10,7 @@ and the stored values are directly comparable.
 """
 
 import logging
+from functools import lru_cache
 from typing import Protocol, cast
 
 from examrag.database.models import EMBEDDING_DIMENSIONS
@@ -134,3 +135,13 @@ def _validate(vectors: list[list[float]], expected_count: int) -> None:
             raise EmbeddingError(
                 f"Expected {EMBEDDING_DIMENSIONS}-dimensional embeddings, got {len(vector)}."
             )
+
+
+@lru_cache
+def get_shared_generator() -> EmbeddingGenerator:
+    """The process-wide generator.
+
+    Ingestion and retrieval must use the same model anyway, and the model is
+    large enough that a second copy is worth avoiding.
+    """
+    return EmbeddingGenerator()

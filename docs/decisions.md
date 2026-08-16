@@ -382,3 +382,94 @@ Vitest shares Vite's config and transform pipeline, so this adds a test runner
 rather than a second build system.
 
 **Date:** 2026-08-16
+
+---
+
+## Fusion combines ranks, not scores
+
+**Decision:** Reciprocal Rank Fusion over the rank each strategy assigned, with
+the damping constant `k = 60`.
+
+**Reason:** A cosine similarity of 0.59 and a `ts_rank_cd` of 0.004 — both real
+values from the same query on the same corpus — say nothing about each other.
+Any attempt to normalise them into a common scale would be an invented
+weighting. Ranks are comparable by construction, and summing reciprocal ranks
+gives a chunk found by both strategies a higher score than one found by either,
+which is precisely the signal hybrid retrieval exists to capture.
+
+**Date:** 2026-08-16
+
+---
+
+## Reranking uses a cross-encoder, not the LLM
+
+**Decision:** `CrossEncoderReranker` wraps `ms-marco-MiniLM-L-6-v2` and runs
+over the fused candidates, before context building.
+
+**Reason:** The bi-encoder behind vector search embeds the query and each chunk
+separately, so it never compares them directly. A cross-encoder reads the pair
+together and scores how well that chunk answers that query — much more accurate,
+and far too slow to run over a whole corpus, which is why it runs last over a
+few dozen candidates. Asking an LLM instead would be slower, cost more and give
+non-deterministic ordering for a job a purpose-built model does better.
+
+Measured on a real query: the cross-encoder scored the relevant passage +4.82
+and an off-topic one −9.02, an ordering neither vector nor keyword search
+produced on its own.
+
+**Date:** 2026-08-16
+
+---
+
+## MCQ generation separates database work from model calls
+
+**Decision:** `MCQGenerator.plan` performs all retrieval, the endpoint commits,
+and `MCQGenerator.generate` then makes only model calls.
+
+**Reason:** The first implementation interleaved them, and the first live run
+failed with "the underlying connection is closed" partway through the second
+section. A quiz takes tens of seconds to minutes, and holding a database
+transaction open across those calls leaves a connection idle long enough to be
+dropped. Even without that failure, pinning a connection and an open
+transaction while waiting on an external service is the wrong shape.
+
+**Date:** 2026-08-16
+
+---
+
+## Quizzes are stored server-side, and a question is answered once
+
+**Decision:** Generated questions, their correct index and their explanations
+live in `quiz_questions`. `POST /quizzes/generate` serialises only id, position,
+question and options. A `UNIQUE` constraint on `quiz_answers.question_id` makes
+a second answer to the same question impossible.
+
+**Reason:** The specification is explicit that hiding the answer in the frontend
+is not sufficient — anything sent to the browser is one devtools panel away.
+Grading on the server means the key never leaves it until the user has
+committed. The uniqueness constraint closes the remaining hole: without it,
+answering repeatedly turns the endpoint into an oracle for the correct option.
+
+Tests assert on the raw response body rather than parsed fields, because a leak
+would most likely arrive as an extra key nobody meant to serialise.
+
+**Date:** 2026-08-16
+
+---
+
+## The default model is a cloud model, and the docs say so
+
+**Decision:** `OLLAMA_MODEL` defaults to `gpt-oss:20b-cloud`.
+
+**Reason:** Ollama was chosen for local, offline, no-key generation. On this
+machine `llama3.1:8b` ran at 0.4 tokens/second and timed out at 180 s per
+section, making the MCQ feature unusable. `gpt-oss:20b-cloud` completes the same
+three-section quiz in 43 seconds.
+
+The trade-off is real and is documented rather than glossed: a `-cloud` model is
+proxied by Ollama to ollama.com, so prompts — including passages retrieved from
+the user's own documents — leave the machine. The README and `.env.example` both
+say this and show how to switch to a pulled local model on hardware that can run
+one. The `LLMClient` protocol means that switch is a configuration change.
+
+**Date:** 2026-08-16

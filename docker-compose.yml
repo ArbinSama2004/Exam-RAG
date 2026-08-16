@@ -32,6 +32,16 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-examrag}
       UPLOAD_DIR: /data/uploads
       MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-50}
+      VECTOR_CANDIDATES: ${VECTOR_CANDIDATES:-30}
+      KEYWORD_CANDIDATES: ${KEYWORD_CANDIDATES:-30}
+      FUSED_CANDIDATES: ${FUSED_CANDIDATES:-30}
+      RERANKER_CANDIDATES: ${RERANKER_CANDIDATES:-20}
+      FINAL_CONTEXT_CHUNKS: ${FINAL_CONTEXT_CHUNKS:-6}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-gpt-oss:20b-cloud}
+      LLM_TEMPERATURE: ${LLM_TEMPERATURE:-0.2}
+      LLM_CONTEXT_TOKENS: ${LLM_CONTEXT_TOKENS:-8192}
+      LLM_TIMEOUT_SECONDS: ${LLM_TIMEOUT_SECONDS:-180}
       # Cache the embedding model on a volume so it downloads once.
       HF_HOME: /data/models
     command: >
@@ -42,12 +52,16 @@ services:
     volumes:
       - ./backend/src:/app/src
       - ./backend/alembic:/app/alembic
-      - ./backend/tests:/app/tests
       - ./data/uploads:/data/uploads
       - model_cache:/data/models
     depends_on:
       postgres:
         condition: service_healthy
+    # Ollama runs on the host rather than as a service: it is often already
+    # installed, may use the host GPU, and its models are large enough that a
+    # container volume is the wrong place for them.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
   frontend:
     build:

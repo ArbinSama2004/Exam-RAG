@@ -23,6 +23,16 @@ class _FakeSession:
         return object()
 
 
+@pytest.fixture(autouse=True)
+def _offline_llm(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Readiness checks the LLM; the suite must not depend on a live Ollama."""
+
+    async def unavailable() -> tuple[bool, str]:
+        return False, "Ollama is unreachable at http://localhost:11434"
+
+    monkeypatch.setattr("examrag.api.health.check_llm_available", unavailable)
+
+
 def _override_session(app: FastAPI, *, fail: bool) -> None:
     async def _session() -> AsyncIterator[_FakeSession]:
         yield _FakeSession(fail=fail)
@@ -56,7 +66,9 @@ async def test_readiness_reports_ready_when_database_responds(
     response = await client.get("/health/ready")
 
     assert response.status_code == 200
-    assert response.json() == {"status": "ready", "database": "ok"}
+    body = response.json()
+    assert body["status"] == "ready"
+    assert body["database"] == "ok"
 
 
 async def test_readiness_reports_503_when_database_is_unreachable(
@@ -67,7 +79,23 @@ async def test_readiness_reports_503_when_database_is_unreachable(
     response = await client.get("/health/ready")
 
     assert response.status_code == 503
-    assert response.json() == {"status": "not_ready", "database": "unavailable"}
+    body = response.json()
+    assert body["status"] == "not_ready"
+    assert body["database"] == "unavailable"
+
+
+async def test_a_missing_llm_does_not_make_the_backend_unready(
+    client: AsyncClient, app: FastAPI
+) -> None:
+    """Upload, ingestion and retrieval all work without a model."""
+    _override_session(app, fail=False)
+
+    response = await client.get("/health/ready")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "ready"
+    assert response.json()["llm"] == "unavailable"
+    assert "unreachable" in response.json()["llm_detail"]
 
 
 async def test_lifespan_creates_the_upload_directory(

@@ -38,6 +38,27 @@ class Settings(BaseSettings):
     upload_dir: Path = Path("/data/uploads")
     max_upload_mb: int = 50
 
+    # Retrieval tuning. Unlike the embedding model or chunker version, these
+    # are read at query time and affect nothing already stored, so they are
+    # environment variables that can be adjusted during evaluation.
+    vector_candidates: int = 30
+    keyword_candidates: int = 30
+    fused_candidates: int = 30
+    reranker_candidates: int = 20
+    final_context_chunks: int = 6
+
+    # LLM generation through Ollama.
+    #
+    # The default is a `-cloud` model, which Ollama proxies to ollama.com: the
+    # prompt, and therefore the retrieved study material, leaves the machine.
+    # A local model keeps everything on the machine but needs the RAM to run
+    # it — set OLLAMA_MODEL to something like llama3.1:8b and pull it first.
+    ollama_base_url: str = "http://localhost:11434"
+    ollama_model: str = "gpt-oss:20b-cloud"
+    llm_temperature: float = 0.2
+    llm_context_tokens: int = 8192
+    llm_timeout_seconds: float = 180.0
+
     @field_validator("cors_origins", mode="before")
     @classmethod
     def _split_origins(cls, value: object) -> object:

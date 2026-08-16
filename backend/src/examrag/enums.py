@@ -43,3 +43,11 @@ class IngestionStage(StrEnum):
     EMBEDDING = "EMBEDDING"
     INDEXING = "INDEXING"
     COMPLETED = "COMPLETED"
+
+
+class Difficulty(StrEnum):
+    """How demanding a generated question should be."""
+
+    EASY = "EASY"
+    MEDIUM = "MEDIUM"
+    HARD = "HARD"

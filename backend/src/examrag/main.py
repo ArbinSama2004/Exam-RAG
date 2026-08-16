@@ -12,7 +12,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from examrag.api import health, upload
+from examrag.api import health, mcq, retrieval, upload
 from examrag.config import Settings, get_settings
 from examrag.database.connection import dispose_engine
 
@@ -53,6 +53,8 @@ def create_app() -> FastAPI:
     )
     app.include_router(health.router)
     app.include_router(upload.router)
+    app.include_router(mcq.router)
+    app.include_router(retrieval.router)
     return app
 
 

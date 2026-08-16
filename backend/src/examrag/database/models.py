@@ -12,6 +12,7 @@ from datetime import datetime
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     Computed,
     DateTime,
     Enum,
@@ -23,11 +24,12 @@ from sqlalchemy import (
     UniqueConstraint,
     func,
 )
-from sqlalchemy.dialects.postgresql import TSVECTOR, UUID
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, TSVECTOR, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from examrag.database.connection import Base
 from examrag.enums import (
+    Difficulty,
     DocumentPurpose,
     DocumentType,
     IngestionStage,
@@ -226,3 +228,121 @@ class Chunk(TimestampMixin, Base):
     )
 
     document: Mapped[Document] = relationship(back_populates="chunks")
+
+
+class Quiz(TimestampMixin, Base):
+    """A generated quiz, and the record that holds its answer key.
+
+    Quizzes are stored server-side because the browser must not receive the
+    correct answers before the user submits. Hiding them in the frontend would
+    put them one devtools panel away.
+    """
+
+    __tablename__ = "quizzes"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    #: Documents the questions were generated from. An array rather than a join
+    #: table: it is read as a whole and never queried across.
+    document_ids: Mapped[list[uuid.UUID]] = mapped_column(
+        ARRAY(UUID(as_uuid=True)),
+        nullable=False,
+    )
+    difficulty: Mapped[Difficulty] = mapped_column(
+        _enum(Difficulty, "difficulty"),
+        nullable=False,
+    )
+    #: The heading the quiz was scoped to, or NULL for all topics.
+    topic: Mapped[str | None] = mapped_column(String(512))
+    question_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    questions: Mapped[list["QuizQuestion"]] = relationship(
+        back_populates="quiz",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        order_by="QuizQuestion.position",
+    )
+
+    @property
+    def is_submitted(self) -> bool:
+        return self.submitted_at is not None
+
+
+class QuizQuestion(TimestampMixin, Base):
+    """One question, with the correct answer that stays on the server."""
+
+    __tablename__ = "quiz_questions"
+    __table_args__ = (
+        UniqueConstraint("quiz_id", "position", name="uq_quiz_questions_quiz_position"),
+        Index("ix_quiz_questions_quiz_id", "quiz_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    quiz_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("quizzes.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    #: Position in the quiz, starting at 0.
+    position: Mapped[int] = mapped_column(Integer, nullable=False)
+    question: Mapped[str] = mapped_column(Text, nullable=False)
+    #: Options in display order. JSONB rather than a table: they are always
+    #: read together and never queried individually.
+    options: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
+    #: The answer key. Never serialized into a response before submission.
+    correct_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    explanation: Mapped[str] = mapped_column(Text, nullable=False)
+    #: Where the question came from, e.g. "notes.pdf, p. 7 - OSI Model".
+    source: Mapped[str] = mapped_column(String(1024), nullable=False)
+
+    quiz: Mapped[Quiz] = relationship(back_populates="questions")
+    answer: Mapped["QuizAnswer | None"] = relationship(
+        back_populates="question",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        uselist=False,
+    )
+
+
+class QuizAnswer(TimestampMixin, Base):
+    """What the user answered, and whether it was right.
+
+    Grading happens on the server at the moment of answering: the browser is
+    told the verdict, never the key it was checked against.
+    """
+
+    __tablename__ = "quiz_answers"
+    __table_args__ = (
+        # One answer per question, so answering repeatedly cannot be used to
+        # search for the correct option.
+        UniqueConstraint("question_id", name="uq_quiz_answers_question"),
+        Index("ix_quiz_answers_quiz_id", "quiz_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    quiz_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("quizzes.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    question_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("quiz_questions.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    selected_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    is_correct: Mapped[bool] = mapped_column(Boolean, nullable=False)
+
+    question: Mapped[QuizQuestion] = relationship(back_populates="answer")

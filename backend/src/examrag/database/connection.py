@@ -42,7 +42,11 @@ def get_engine() -> AsyncEngine:
         _engine = create_async_engine(
             settings.database_url,
             echo=settings.debug,
+            # Verify a pooled connection before handing it out. Generation can
+            # leave a connection idle for minutes while the model works, and an
+            # idle TCP connection between containers does get dropped.
             pool_pre_ping=True,
+            pool_recycle=1800,
         )
     return _engine
 

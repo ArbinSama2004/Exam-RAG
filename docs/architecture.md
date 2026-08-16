@@ -25,15 +25,15 @@ state in PostgreSQL.
 | ------ | -------------- | ------ |
 | `main.py` | Application factory: settings, logging, CORS, routers, lifespan | Implemented |
 | `config.py` | Environment-driven settings, database URL construction | Implemented |
-| `api/` | HTTP routers; thin, delegating to services | `health.py`, `upload.py` implemented |
+| `api/` | HTTP routers; thin, delegating to services | `health`, `upload`, `mcq`, `retrieval` |
 | `database/` | Async engine, session factory, ORM models, chunk/vector storage | Implemented |
 | `enums.py` | Domain enumerations shared by models, schemas and API | Implemented |
-| `schemas/` | Pydantic request/response models | `health.py`, `document.py` implemented |
+| `schemas/` | Pydantic request/response models | `health`, `document`, `mcq`, `retrieval` |
 | `ingestion/` | Loading, normalization, cleaning, chunking, file storage, pipeline | Implemented |
 | `embeddings/` | Embedding generation | Implemented |
-| `retrieval/` | `base`, `vector_search`, `keyword_search`, `fusion`, `reranker` | Phase 2 |
-| `rag/` | Orchestration: pipeline and context building | Phase 2 |
-| `generation/` | LLM client, prompt building, MCQ and answer generation | Phase 2 |
+| `retrieval/` | `base`, `filters`, `vector_search`, `keyword_search`, `fusion`, `reranker` | Implemented |
+| `rag/` | Orchestration: pipeline and context building | Implemented |
+| `generation/` | LLM client, prompt building, MCQ and answer generation | Implemented |
 | `faq/` | Question extraction, normalization, clustering, frequency analysis | Phase 3 |
 
 `main.py` contains no pipeline logic. Business logic stays out of route
@@ -212,6 +212,77 @@ exists with that `(file hash, purpose)`:
   impossible anyway, since `(original_file_hash, purpose)` is unique, and
   retrying in place keeps the document id the frontend already holds. Writing
   the file again also recovers a document whose upload volume was cleared.
+
+## Retrieval
+
+```text
+Query
+  ├─► VectorRetriever  (pgvector, cosine) ──┐
+  └─► KeywordRetriever (tsvector, ts_rank) ─┴─► RRF ─► CrossEncoderReranker ─► Context
+```
+
+Every strategy implements `Retriever` and returns `RetrievedChunk`, which is
+what lets fusion combine them without knowing where a result came from — and
+what would let a future graph retriever join in without touching the pipeline,
+the API or the frontend. No graph retriever exists.
+
+`filters.py` holds the rules every strategy shares, so a new strategy inherits
+them. The most important: **past papers are never returned as answer evidence**
+unless a query asks for that purpose explicitly. Documents still ingesting are
+excluded too, since their chunks are incomplete.
+
+| Stage | Why |
+| ----- | --- |
+| Vector | Finds meaning without shared words — handles paraphrase |
+| Keyword | Finds exact terms, acronyms and numbers — where embeddings are weakest |
+| Fusion | Combines **ranks**, not scores: a cosine similarity and a text-rank score are different scales. A chunk found by both outranks one found by either |
+| Reranking | A cross-encoder reads query and chunk *together*, which a bi-encoder never does. Accurate but slow, so it runs last over a few dozen candidates |
+
+An LLM is not used for reranking: slower, costlier and non-deterministic for a
+job a purpose-built model does better.
+
+Candidate counts at each stage are environment variables, so they can be tuned
+during evaluation without code changes.
+
+## Generation
+
+`generation/llm_client.py` defines the `LLMClient` protocol; `OllamaClient`
+implements it over Ollama's HTTP API. Prompt building, MCQ generation and
+answer generation depend on the protocol, so adding a provider means adding a
+class, not editing callers.
+
+**MCQ generation is split into two phases.** `plan` does all database work —
+listing sections, retrieving context — and `generate` makes only model calls.
+A quiz takes tens of seconds to minutes, and the first end-to-end run showed
+why this matters: holding a database transaction open across those calls left
+a connection idle long enough to be dropped mid-quiz.
+
+For **all topics**, generation walks the document's sections and retrieves per
+section, rather than taking one global top-k that would produce every question
+about whichever part ranked highest.
+
+Model output is untrusted: shape validated, wrong option counts and duplicate
+options rejected, near-duplicate questions dropped, and passage citations
+resolved to real sources or dropped rather than misattributed.
+
+## Quizzes
+
+The browser must not learn a correct answer before committing to one, so
+quizzes are server-side:
+
+| Endpoint | Returns |
+| -------- | ------- |
+| `POST /quizzes/generate` | Quiz id, questions and options — no key |
+| `GET /quizzes/{id}` | The same, for reloading mid-quiz |
+| `POST /quizzes/{id}/answer` | Grades one answer, then reveals the correct one |
+| `POST /quizzes/{id}/submit` | Final score and full review |
+
+A question can be answered only once, so repeated calls cannot be used as an
+oracle for the correct option.
+
+`POST /retrieval/compare` runs one query through all four methods using this
+same pipeline, so the comparison screen shows the system in use rather than a
+parallel implementation.
 
 ## Data model
 

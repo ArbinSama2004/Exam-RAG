@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from examrag.database.connection import get_session_factory
 from examrag.database.models import Document, IngestionJob
 from examrag.database.vector_store import replace_chunks
-from examrag.embeddings.embedding_generator import EmbeddingGenerator
+from examrag.embeddings.embedding_generator import EmbeddingGenerator, get_shared_generator
 from examrag.enums import IngestionStage, ProcessingStatus
 from examrag.ingestion.chunker import CHUNKER_VERSION, chunk_document
 from examrag.ingestion.document_loader import load_document
@@ -28,8 +28,6 @@ from examrag.ingestion.file_storage import content_hash, read_upload
 from examrag.ingestion.markdown_cleaner import clean_document
 
 logger = logging.getLogger(__name__)
-
-_default_generator = EmbeddingGenerator()
 
 
 async def process_document(
@@ -46,7 +44,7 @@ async def process_document(
         if document is None:
             logger.error("Ingestion asked for unknown document %s", document_id)
             return
-        await run_ingestion(session, document, generator or _default_generator)
+        await run_ingestion(session, document, generator or get_shared_generator())
         await session.commit()
 
 

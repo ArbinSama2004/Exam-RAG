@@ -235,7 +235,13 @@ async def test_documents_can_be_listed_newest_first(
     response = await api.get("/documents")
 
     assert response.status_code == 200
-    filenames = [document["filename"] for document in response.json()]
+    # Filtered to this test's own uploads: the developer's database may hold
+    # documents from manual testing.
+    filenames = [
+        document["filename"]
+        for document in response.json()
+        if document["filename"] in {"first.md", "second.md"}
+    ]
     assert filenames == ["second.md", "first.md"]
 
 

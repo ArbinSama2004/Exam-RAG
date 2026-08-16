@@ -6,7 +6,14 @@ from examrag.enums import DocumentPurpose, DocumentType, IngestionStage, Process
 
 
 def test_expected_tables_are_registered() -> None:
-    assert set(Base.metadata.tables) == {"documents", "ingestion_jobs", "chunks"}
+    assert set(Base.metadata.tables) == {
+        "documents",
+        "ingestion_jobs",
+        "chunks",
+        "quizzes",
+        "quiz_questions",
+        "quiz_answers",
+    }
 
 
 def test_document_purpose_matches_the_specification() -> None:

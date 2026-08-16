@@ -4,16 +4,19 @@ A local, single-user RAG application for exam preparation. Upload your study
 material and past question papers, then generate practice MCQs and discover the
 questions that keep coming back.
 
-> **Status: Phase 1 is complete.** Upload a document in the browser and watch it
-> convert, chunk, embed and index into PostgreSQL + pgvector. Retrieval, MCQ
-> generation and FAQ analysis arrive in Phases 2 and 3.
+> **Status: Phases 1 and 2 are complete.** Upload documents, generate
+> RAG-grounded MCQ quizzes, take them with server-side scoring, and inspect how
+> each retrieval method performs on the same query. The FAQ generator arrives
+> in Phase 3.
 
 ## Features
 
 - **Document upload** — PDF, DOCX, Markdown and TXT, each classified as
   `STUDY_MATERIAL` or `PAST_PAPER`, with live ingestion progress *(done)*
 - **MCQ generator** — RAG-grounded practice quizzes with scoring and review
-  *(Phase 2)*
+  *(done)*
+- **Retrieval comparison** — vector, keyword, hybrid and reranked, side by side
+  *(done)*
 - **Past paper FAQ generator** — finds semantically repeated exam questions and
   how often they appear *(Phase 3)*
 
@@ -34,6 +37,8 @@ See [docs/architecture.md](docs/architecture.md) for detail.
 | Backend  | Python 3.12, FastAPI, Uvicorn, Pydantic v2, SQLAlchemy 2 (async), Alembic |
 | Documents | PyMuPDF (PDF), python-docx (DOCX) |
 | Embeddings | sentence-transformers (`all-MiniLM-L6-v2`, 384-d), PyTorch CPU |
+| Retrieval | pgvector + PostgreSQL full-text, RRF fusion, cross-encoder reranking |
+| LLM | Ollama on the host |
 | Database | PostgreSQL 17 with pgvector |
 | Frontend | React, TypeScript, Vite, TanStack Query |
 | Tooling  | uv, pytest, Ruff, mypy, Docker Compose, Make |
@@ -41,6 +46,7 @@ See [docs/architecture.md](docs/architecture.md) for detail.
 ## Prerequisites
 
 - Docker and Docker Compose
+- [Ollama](https://ollama.com) on the host, for MCQ and answer generation
 - Optional, for running services outside Docker: [uv](https://docs.astral.sh/uv/)
   and Node.js 22
 
@@ -73,7 +79,12 @@ database migrations and starts the backend and frontend.
 | `GET /documents` | List documents, newest first. Add `?purpose=` to filter. |
 | `GET /documents/{id}` | One document and the model/chunker behind its chunks. |
 | `GET /documents/{id}/status` | Ingestion status and stage — poll until `READY` or `FAILED`. |
-| `GET /health`, `GET /health/ready` | Liveness and readiness. |
+| `POST /quizzes/generate` | Generate a quiz. Returns questions and options — never the answer key. |
+| `POST /quizzes/{id}/answer` | Grade one answer and reveal the correct one. |
+| `POST /quizzes/{id}/submit` | Final score and review. |
+| `POST /retrieval/compare` | One query through vector, keyword, hybrid and reranked retrieval. |
+| `POST /retrieval/answer` | A grounded answer with its sources. |
+| `GET /health`, `GET /health/ready` | Liveness and readiness (readiness also reports the LLM). |
 
 Try it:
 
@@ -99,6 +110,24 @@ out of the box; the ones you are most likely to change are:
 | `UPLOAD_DIR` | `/data/uploads` | Upload path inside the container, bind-mounted to `./data/uploads` |
 | `MAX_UPLOAD_MB` | `50` | Largest accepted upload |
 | `VITE_API_BASE_URL` | `http://localhost:8000` | Backend URL used by the frontend |
+| `OLLAMA_BASE_URL` | `http://host.docker.internal:11434` | Ollama on the host |
+| `OLLAMA_MODEL` | `gpt-oss:20b-cloud` | Generation model — see the note below |
+| `VECTOR_CANDIDATES` etc. | `30/30/30/20/6` | Retrieval tuning, adjustable during evaluation |
+
+### Choosing a model
+
+The default `gpt-oss:20b-cloud` is a **cloud** model: Ollama proxies it to
+ollama.com, so your prompts — including passages retrieved from your documents
+— leave this machine. It is fast and needs no local RAM.
+
+To keep everything on your machine instead, pull a local model and point at it:
+
+```bash
+ollama pull llama3.1:8b
+```
+
+Then set `OLLAMA_MODEL=llama3.1:8b` in `.env`. Local generation needs enough
+free RAM; on a memory-constrained machine an 8B model can be unusably slow.
 
 ## How to run
 

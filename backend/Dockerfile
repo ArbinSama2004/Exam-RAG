@@ -10,14 +10,15 @@ ENV UV_COMPILE_BYTECODE=1 \
 WORKDIR /app
 
 # Install dependencies first so code changes do not invalidate this layer.
+# Runtime only: the test tooling and the tests themselves are not shipped, and
+# the suite runs on the host with `make test`.
 COPY pyproject.toml uv.lock README.md ./
-RUN uv sync --extra dev --frozen --no-install-project
+RUN uv sync --frozen --no-install-project --no-dev
 
 COPY alembic.ini ./
 COPY alembic ./alembic
 COPY src ./src
-COPY tests ./tests
-RUN uv sync --extra dev --frozen
+RUN uv sync --frozen --no-dev
 
 EXPOSE 8000
 

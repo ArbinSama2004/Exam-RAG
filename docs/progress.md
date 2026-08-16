@@ -90,6 +90,40 @@ Task 6 — Upload endpoint, jobs, background processing, duplicates (2026-08-16)
 
 ### Not Started
 
+## Phase 2 — Complete RAG Retrieval + MCQ Feature
+
+### Completed (2026-08-16)
+
+- [x] `Retriever` interface, `RetrievedChunk`, shared selection filters
+- [x] Vector search through pgvector; keyword search through `tsvector`
+- [x] Past papers excluded from answer evidence unless requested
+- [x] Reciprocal Rank Fusion over ranks
+- [x] Cross-encoder reranking (`ms-marco-MiniLM-L-6-v2`)
+- [x] `RagPipeline` with a `RetrievalTrace` keeping every stage's output
+- [x] Context builder: numbered, attributed passages within a budget
+- [x] `LLMClient` protocol with an Ollama implementation over httpx
+- [x] Prompt builder for grounded answers and MCQs
+- [x] MCQ generation distributed across document sections
+- [x] Output validation, deduplication, citation resolution
+- [x] Quiz tables and migration `0003`; answer key stays server-side
+- [x] `POST /quizzes/generate`, `/answer`, `/submit`; one answer per question
+- [x] `POST /retrieval/compare` and `/retrieval/answer`
+- [x] Retrieval tuning values as environment variables
+- [x] Frontend: tabs, MCQ setup, quiz, review, retrieval comparison
+- [x] 116 new backend tests and 17 new frontend tests
+
+### Verified end to end
+
+- Retrieval comparison over a real document: the reranker scored an irrelevant
+  chunk at −9.02 while the relevant one scored +4.82
+- Quiz generated in 43 s with `gpt-oss:20b-cloud`, one question per section
+- Answering revealed the key only after committing; re-answering returned 409
+- The generated quiz response contained no `correct_index` or `explanation`
+
+### In Progress
+
+- [ ] Phase 3 — Past paper FAQ generator and evaluation
+
 ### Problems
 
 - `pydantic-settings` JSON-decodes list-typed fields before validators run, so
@@ -133,6 +167,21 @@ Task 6 — Upload endpoint, jobs, background processing, duplicates (2026-08-16)
 - Testing Library's `upload` honours the input's `accept` attribute, so a test
   that expected the backend to reject a `.pptx` never got that far. The picker
   filters it first; the test now covers a real backend rejection (Task 7).
+- The first live quiz generation died with "the underlying connection is
+  closed": the endpoint held a database transaction open across three model
+  calls, and the idle connection was dropped. Generation is now split into a
+  database phase and a model phase, with the transaction released between them
+  (Phase 2).
+- `llama3.1:8b` ran at 0.4 tokens/second on this machine and timed out at 180 s
+  per section. Switched to `gpt-oss:20b-cloud`, which completes a three-section
+  quiz in 43 s — but it is proxied to ollama.com, so prompts leave the machine
+  (Phase 2).
+- `httpx` was declared as a dev dependency while `llm_client.py` imports it at
+  runtime. It only worked because the image installed dev extras; moved to the
+  runtime dependencies (Phase 2).
+- The embedding model was loading twice — once for ingestion's module-level
+  instance and once for the API dependency. Both now share one instance
+  (Phase 2).
 
 ### Decisions
 
@@ -155,3 +204,6 @@ Recorded in [decisions.md](decisions.md):
 - Duplicate uploads reused, failed ones retried in place
 - Ingestion progress committed per stage so polling is meaningful
 - Frontend polls in the background and stops at a terminal status
+- Retrieval components behind one interface, fusion over ranks
+- MCQ generation split into a database phase and a model phase
+- Quizzes stored server-side so the answer key never reaches the browser early

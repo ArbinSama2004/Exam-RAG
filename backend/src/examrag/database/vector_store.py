@@ -11,6 +11,7 @@ are added in Phase 2.
 
 import logging
 import uuid
+from collections.abc import Sequence
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -122,3 +123,19 @@ async def get_chunks(session: AsyncSession, document_id: uuid.UUID) -> list[Chun
         select(Chunk).where(Chunk.document_id == document_id).order_by(Chunk.chunk_index)
     )
     return list(result.scalars())
+
+
+async def list_headings(session: AsyncSession, document_ids: Sequence[uuid.UUID]) -> list[str]:
+    """Return the distinct heading breadcrumbs across the given documents.
+
+    These are the sections that all-topics MCQ generation distributes questions
+    across, so questions cover the whole document instead of whichever part
+    one global retrieval happened to favour.
+    """
+    result = await session.execute(
+        select(Chunk.heading)
+        .where(Chunk.document_id.in_(document_ids), Chunk.heading.isnot(None))
+        .distinct()
+        .order_by(Chunk.heading)
+    )
+    return [heading for heading in result.scalars() if heading]

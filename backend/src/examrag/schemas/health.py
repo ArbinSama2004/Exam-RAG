@@ -15,7 +15,14 @@ class HealthResponse(BaseModel):
 
 
 class ReadinessResponse(BaseModel):
-    """Readiness response: the API and its required dependencies are usable."""
+    """Readiness response: the API and its dependencies.
+
+    Only the database decides readiness. The LLM is reported so a missing model
+    is visible before a user waits on a generation request, but the rest of the
+    application — upload, ingestion, retrieval — works without it.
+    """
 
     status: Literal["ready", "not_ready"]
     database: Literal["ok", "unavailable"]
+    llm: Literal["ok", "unavailable"] = "unavailable"
+    llm_detail: str | None = None

@@ -54,6 +54,76 @@ export interface IngestionStatus {
   updated_at: string;
 }
 
+export type Difficulty = "EASY" | "MEDIUM" | "HARD";
+
+export interface QuizQuestionPublic {
+  id: string;
+  position: number;
+  question: string;
+  options: string[];
+}
+
+export interface QuizPublic {
+  id: string;
+  difficulty: Difficulty;
+  topic: string | null;
+  question_count: number;
+  questions: QuizQuestionPublic[];
+  created_at: string;
+}
+
+export interface AnswerResult {
+  question_id: string;
+  selected_index: number;
+  correct_index: number;
+  is_correct: boolean;
+  explanation: string;
+  source: string;
+}
+
+export interface QuizQuestionReview {
+  id: string;
+  position: number;
+  question: string;
+  options: string[];
+  correct_index: number;
+  explanation: string;
+  source: string;
+  selected_index: number | null;
+  is_correct: boolean | null;
+}
+
+export interface QuizResult {
+  quiz_id: string;
+  score: number;
+  total: number;
+  correct: number;
+  incorrect: number;
+  unanswered: number;
+  questions: QuizQuestionReview[];
+  submitted_at: string;
+}
+
+export interface RetrievedChunk {
+  chunk_id: string;
+  document_id: string;
+  filename: string;
+  content: string;
+  score: number;
+  rank: number;
+  page_number: number | null;
+  heading: string | null;
+  source: string;
+}
+
+export interface RetrievalComparison {
+  query: string;
+  vector: RetrievedChunk[];
+  keyword: RetrievedChunk[];
+  hybrid: RetrievedChunk[];
+  hybrid_reranked: RetrievedChunk[];
+}
+
 export interface UploadResponse {
   document: DocumentSummary;
   job_id: string;
@@ -129,4 +199,48 @@ export function uploadDocument(file: File, purpose: DocumentPurpose): Promise<Up
   form.append("file", file);
   form.append("purpose", purpose);
   return request<UploadResponse>("/documents", { method: "POST", body: form });
+}
+
+function postJson<T>(path: string, body: unknown): Promise<T> {
+  return request<T>(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+export function generateQuiz(input: {
+  documentIds: string[];
+  count: number;
+  difficulty: Difficulty;
+  topic: string | null;
+}): Promise<QuizPublic> {
+  return postJson<QuizPublic>("/quizzes/generate", {
+    document_ids: input.documentIds,
+    count: input.count,
+    difficulty: input.difficulty,
+    topic: input.topic,
+  });
+}
+
+export function answerQuestion(
+  quizId: string,
+  questionId: string,
+  selectedIndex: number,
+): Promise<AnswerResult> {
+  return postJson<AnswerResult>(`/quizzes/${quizId}/answer`, {
+    question_id: questionId,
+    selected_index: selectedIndex,
+  });
+}
+
+export function submitQuiz(quizId: string): Promise<QuizResult> {
+  return postJson<QuizResult>(`/quizzes/${quizId}/submit`, {});
+}
+
+export function compareRetrieval(query: string, documentIds: string[]): Promise<RetrievalComparison> {
+  return postJson<RetrievalComparison>("/retrieval/compare", {
+    query,
+    document_ids: documentIds,
+  });
 }
