@@ -18,9 +18,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from examrag.database.connection import get_session
 from examrag.database.models import EMBEDDING_DIMENSIONS, Chunk, Document
 from examrag.dependencies import get_llm_client, get_rag_pipeline
+from examrag.embeddings.embedding_generator import EmbeddingError
 from examrag.enums import DocumentPurpose, DocumentType, ProcessingStatus
 from examrag.main import create_app
 from examrag.rag.context_builder import Context, ContextPassage
+from examrag.retrieval.reranker import RerankerError
 
 QUESTIONS = [
     {
@@ -76,23 +78,40 @@ class FakePipeline:
         )
 
 
+class RerankerFailingPipeline:
+    """Simulates the cross-encoder being unavailable during planning."""
+
+    async def build_context(self, query: object) -> Context:
+        raise RerankerError("Could not load the cross-encoder.")
+
+
+class EmbeddingFailingPipeline:
+    """Simulates the embedding model being unavailable during planning."""
+
+    async def build_context(self, query: object) -> Context:
+        raise EmbeddingError("Could not load the embedding model.")
+
+
 @pytest.fixture
 def llm() -> FakeLLM:
     return FakeLLM()
 
 
-@pytest.fixture
-async def api(db_session: AsyncSession, llm: FakeLLM) -> AsyncIterator[AsyncClient]:
+def build_app(db_session: AsyncSession, pipeline: object, llm: FakeLLM) -> FastAPI:
     app: FastAPI = create_app()
 
     async def session_override() -> AsyncIterator[AsyncSession]:
         yield db_session
 
     app.dependency_overrides[get_session] = session_override
-    app.dependency_overrides[get_rag_pipeline] = lambda: FakePipeline()
+    app.dependency_overrides[get_rag_pipeline] = lambda: pipeline
     app.dependency_overrides[get_llm_client] = lambda: llm
+    return app
 
-    transport = ASGITransport(app=app)
+
+@pytest.fixture
+async def api(db_session: AsyncSession, llm: FakeLLM) -> AsyncIterator[AsyncClient]:
+    transport = ASGITransport(app=build_app(db_session, FakePipeline(), llm))
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         yield client
 
@@ -223,6 +242,38 @@ class TestGeneration:
 
         questions = [question["question"] for question in body["questions"]]
         assert len(questions) == len(set(questions))
+
+
+class TestRetrievalFailureDuringPlanning:
+    """`plan()` retrieves before any model call — its own failures must not 500.
+
+    The first implementation only wrapped `generator.generate()` in a
+    try/except, leaving `generator.plan()` — which does the actual retrieval —
+    uncaught. A missing reranker or embedding model surfaced as an unhandled
+    500 instead of the same 503 every other retrieval-backed endpoint returns.
+    """
+
+    async def test_a_reranker_failure_is_translated_to_503(
+        self, db_session: AsyncSession, llm: FakeLLM
+    ) -> None:
+        document = await make_document(db_session)
+        transport = ASGITransport(app=build_app(db_session, RerankerFailingPipeline(), llm))
+
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            response = await generate(client, document)
+
+        assert response.status_code == 503
+
+    async def test_an_embedding_failure_is_translated_to_503(
+        self, db_session: AsyncSession, llm: FakeLLM
+    ) -> None:
+        document = await make_document(db_session)
+        transport = ASGITransport(app=build_app(db_session, EmbeddingFailingPipeline(), llm))
+
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            response = await generate(client, document)
+
+        assert response.status_code == 503
 
 
 class TestAnswering:

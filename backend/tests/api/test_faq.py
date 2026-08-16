@@ -45,18 +45,27 @@ class HashEncoder:
         return self.dimensions
 
 
-@pytest.fixture
-async def api(db_session: AsyncSession) -> AsyncIterator[AsyncClient]:
+class FailingEncoder(HashEncoder):
+    """Simulates the embedding model being unavailable."""
+
+    def encode(self, *args: object, **kwargs: object) -> list[list[float]]:
+        raise RuntimeError("model unavailable")
+
+
+def build_app(db_session: AsyncSession, generator: EmbeddingGenerator) -> FastAPI:
     app: FastAPI = create_app()
 
     async def session_override() -> AsyncIterator[AsyncSession]:
         yield db_session
 
     app.dependency_overrides[get_session] = session_override
-    app.dependency_overrides[get_embedding_generator] = lambda: EmbeddingGenerator(
-        encoder=HashEncoder()
-    )
+    app.dependency_overrides[get_embedding_generator] = lambda: generator
+    return app
 
+
+@pytest.fixture
+async def api(db_session: AsyncSession) -> AsyncIterator[AsyncClient]:
+    app = build_app(db_session, EmbeddingGenerator(encoder=HashEncoder()))
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         yield client
@@ -144,3 +153,18 @@ async def test_no_past_papers_returns_an_empty_response(api: AsyncClient) -> Non
 
     assert response.status_code == 200
     assert response.json() == {"question_count": 0, "document_count": 0, "clusters": []}
+
+
+async def test_an_embedding_failure_returns_503_not_500(db_session: AsyncSession) -> None:
+    """A missing embedding model must not surface as an unhandled 500."""
+    paper = past_paper()
+    paper.chunks = [chunk(QUESTION)]
+    db_session.add(paper)
+    await db_session.flush()
+
+    app = build_app(db_session, EmbeddingGenerator(encoder=FailingEncoder()))
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post("/faq/generate", json={})
+
+    assert response.status_code == 503

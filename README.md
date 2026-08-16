@@ -4,10 +4,11 @@ A local, single-user RAG application for exam preparation. Upload your study
 material and past question papers, then generate practice MCQs and discover the
 questions that keep coming back.
 
-> **Status: Phases 1 through 3 are complete.** Upload documents, generate
+> **Status: All four phases are complete.** Upload documents, generate
 > RAG-grounded MCQ quizzes, take them with server-side scoring, inspect how
 > each retrieval method performs on the same query, and find the exam
-> questions that keep coming back across past papers.
+> questions that keep coming back across past papers. Phase 4 hardened
+> crash recovery and error handling; see [Known limitations](#known-limitations).
 
 ## Features
 
@@ -139,6 +140,10 @@ make down           # stop
 make clean          # stop and delete the database volume
 ```
 
+`make up` applies migrations and recovers any job orphaned by a previous crash
+before the backend starts serving traffic — see
+[docs/architecture.md](docs/architecture.md#upload-and-ingestion).
+
 To run the services directly on your machine instead:
 
 ```bash
@@ -199,8 +204,11 @@ Progress is tracked in [docs/progress.md](docs/progress.md).
 
 - The application is local and single-user: there is no authentication and no
   multi-tenancy.
-- Ingestion runs in FastAPI background tasks. If the backend stops mid-job, that
-  job must be re-uploaded.
+- Ingestion runs in FastAPI background tasks, so a document mid-job when the
+  backend stops is orphaned. On the next start, before the API accepts
+  traffic, `recover_interrupted_jobs` marks any job still `UPLOADED` or
+  `PROCESSING` as `FAILED` — re-uploading the same file then retries it in
+  place, the same as any other failed ingestion.
 - The first upload downloads the embedding model (about 90 MB). It is cached on
   the `model_cache` volume afterwards.
 - Embeddings run on CPU. The backend image is around 3.8 GB, most of it PyTorch.

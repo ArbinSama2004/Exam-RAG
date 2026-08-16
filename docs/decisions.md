@@ -580,3 +580,93 @@ server-side state only where correctness requires it (quizzes, because the
 answer key must not reach the browser early).
 
 **Date:** 2026-08-16
+
+---
+
+## Crash recovery runs alongside migrations, not in FastAPI's lifespan
+
+**Decision:** `recover_interrupted_jobs` — which fails any ingestion job still
+`UPLOADED` or `PROCESSING`, since a background task cannot survive the process
+that ran it exiting — runs as its own step in the `backend` service's Docker
+Compose command, between `alembic upgrade head` and `uvicorn`. It is not
+wired into `main.py`'s `lifespan`.
+
+**Reason:** Liveness (`GET /health`) is deliberately dependency-free — that is
+the entire reason liveness and readiness are separate endpoints, so the
+frontend can show a meaningful message while PostgreSQL is still starting.
+Putting a database query in `lifespan` startup would make that guarantee
+false: the API could no longer come up before the database does, and every
+test that boots the app through its lifespan (several do, to test liveness
+itself) would need a reachable database just to construct the client. Running
+the sweep as a separate step after `alembic upgrade head`, which already
+requires the database, gets the same ordering guarantee — recovery always
+completes before the API serves its first request — without threading a
+database dependency through application startup.
+
+**Date:** 2026-08-16
+
+---
+
+## Re-uploading a document stuck at PROCESSING did nothing; recovery is what fixes it
+
+**Decision:** On top of the decision above, retry-in-place (`api/upload.py`)
+still only fires for a document whose status is `FAILED`. Nothing changed
+there. What changed is that `recover_interrupted_jobs` now guarantees a
+crash-orphaned document reaches `FAILED`, which is the state retry-in-place
+already knew how to handle.
+
+**Reason:** This was Phase 4's most concrete finding: the README always said
+"if the backend stops mid-job, that job must be re-uploaded," but re-uploading
+did not actually work. `_find_existing` only retries in place when the
+existing document's status *is* `FAILED` — a document orphaned by a crash
+sits at `PROCESSING` (or `UPLOADED`), which the code's own condition
+(`if existing.status is not FAILED: reuse`) sent down the reuse path instead,
+returning the same stuck document untouched. The fix is recovery marking it
+`FAILED`, not a second code path in the upload handler — the retry logic was
+already correct, it just needed a way to run.
+
+**Date:** 2026-08-16
+
+---
+
+## `EmbeddingError` gets the same 503 treatment as `RerankerError` and `LLMError`
+
+**Decision:** `/retrieval/compare`, `/retrieval/answer`, `/quizzes/generate`
+and `/faq/generate` each catch `EmbeddingError` and return `503`, matching how
+`RerankerError` and `LLMError` were already handled.
+
+**Reason:** All three exceptions mean the same thing — a model this request
+needed is not available — and every other one already got a clean, actionable
+response instead of a raw traceback. `EmbeddingError` was the one gap: nothing
+caught it, so a corrupted model cache or a dimension mismatch surfaced as an
+unhandled `500`. Found by reading the four call sites side by side rather than
+by a report, since embeddings almost never fail once ingestion has proven the
+model loads — which is exactly why the gap went unnoticed.
+
+`/quizzes/generate` needed the fix in two places: `MCQGenerator.plan()`
+retrieves before any model call and was outside the endpoint's only
+try/except, which wrapped `generate()` alone.
+
+**Date:** 2026-08-16
+
+---
+
+## A raced duplicate upload is caught as an `IntegrityError`, not prevented
+
+**Decision:** `upload_document` does not lock or re-check before inserting a
+new document. It attempts the insert, and if the `(original_file_hash,
+purpose)` constraint rejects it — because a concurrent request for the same
+new file won the race — it rolls back, deletes the file it had already
+written, looks the document up again, and returns the winner's row as
+`reused: true`.
+
+**Reason:** Locking (`SELECT ... FOR UPDATE`) or a Redis-backed mutex would
+prevent the race, but for a local single-user application the race is rare
+enough (two near-simultaneous requests for the exact same new file — a
+double-click, a retried request) that the constraint itself is a sufficient
+guard, and it is one the database already enforces for free. What was missing
+was handling the exception it raises: before this, the loser's request ended
+in an unhandled `500` instead of the same graceful reuse an intentional
+re-upload gets.
+
+**Date:** 2026-08-16

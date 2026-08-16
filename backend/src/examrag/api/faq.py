@@ -11,12 +11,12 @@ uploaded a minute ago.
 import logging
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from examrag.database.connection import get_session
 from examrag.dependencies import get_embedding_generator
-from examrag.embeddings.embedding_generator import EmbeddingGenerator
+from examrag.embeddings.embedding_generator import EmbeddingError, EmbeddingGenerator
 from examrag.faq.faq_pipeline import generate_faqs
 from examrag.schemas.faq import (
     FaqClusterResponse,
@@ -37,12 +37,15 @@ async def generate(
     generator: Annotated[EmbeddingGenerator, Depends(get_embedding_generator)],
 ) -> FaqGenerateResponse:
     """Extract, cluster and rank the questions found in the selected past papers."""
-    result = await generate_faqs(
-        session,
-        generator,
-        document_ids=request.document_ids or None,
-        min_occurrences=request.min_occurrences,
-    )
+    try:
+        result = await generate_faqs(
+            session,
+            generator,
+            document_ids=request.document_ids or None,
+            min_occurrences=request.min_occurrences,
+        )
+    except EmbeddingError as exc:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
 
     return FaqGenerateResponse(
         question_count=result.question_count,

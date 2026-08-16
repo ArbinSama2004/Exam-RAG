@@ -19,10 +19,12 @@ from sqlalchemy.orm import selectinload
 from examrag.database.connection import get_session
 from examrag.database.models import Document, Quiz, QuizAnswer, QuizQuestion
 from examrag.dependencies import get_llm_client, get_rag_pipeline
+from examrag.embeddings.embedding_generator import EmbeddingError
 from examrag.enums import ProcessingStatus
 from examrag.generation.llm_client import LLMClient, LLMError
 from examrag.generation.mcq_generator import MCQGenerationError, MCQGenerator, MCQRequest
 from examrag.rag.pipeline import RagPipeline
+from examrag.retrieval.reranker import RerankerError
 from examrag.schemas.mcq import (
     AnswerRequest,
     AnswerResult,
@@ -62,7 +64,12 @@ async def generate_quiz(
     # Retrieval first, then release the transaction: writing a quiz can take
     # minutes, and a database connection held open across those model calls
     # gets dropped while it sits idle.
-    plans = await generator.plan(mcq_request)
+    try:
+        plans = await generator.plan(mcq_request)
+    except RerankerError as exc:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
+    except EmbeddingError as exc:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
     await session.commit()
 
     try:

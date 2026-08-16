@@ -10,8 +10,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from examrag.database.connection import get_session
 from examrag.dependencies import get_llm_client, get_rag_pipeline
+from examrag.embeddings.embedding_generator import EmbeddingError
 from examrag.rag.pipeline import RetrievalTrace
 from examrag.retrieval.base import RetrievedChunk
+from examrag.retrieval.reranker import RerankerError
 
 from .test_mcq import FakeLLM
 
@@ -48,6 +50,19 @@ class TracePipeline:
         from examrag.rag.context_builder import build_context
 
         return build_context([chunk("shared", 1)])
+
+
+class FailingPipeline:
+    """Raises whatever exception a retrieval-backed model failure would."""
+
+    def __init__(self, exc: Exception) -> None:
+        self._exc = exc
+
+    async def retrieve(self, query: object) -> RetrievalTrace:
+        raise self._exc
+
+    async def build_context(self, query: object):
+        raise self._exc
 
 
 @pytest.fixture
@@ -136,3 +151,43 @@ class TestAnswer:
         body = (await api.post("/retrieval/answer", json={"query": "What is TCP?"})).json()
 
         assert body["question"] == "What is TCP?"
+
+
+class TestRetrievalFailures:
+    """A missing reranker or embedding model must return 503, not an unhandled 500."""
+
+    async def _client(self, db_session: AsyncSession, exc: Exception) -> AsyncClient:
+        app = create_app_with(db_session, FailingPipeline(exc))
+        return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
+
+    async def test_a_reranker_failure_makes_compare_return_503(
+        self, db_session: AsyncSession
+    ) -> None:
+        async with await self._client(db_session, RerankerError("unavailable")) as client:
+            response = await client.post("/retrieval/compare", json={"query": "TCP"})
+
+        assert response.status_code == 503
+
+    async def test_an_embedding_failure_makes_compare_return_503(
+        self, db_session: AsyncSession
+    ) -> None:
+        async with await self._client(db_session, EmbeddingError("unavailable")) as client:
+            response = await client.post("/retrieval/compare", json={"query": "TCP"})
+
+        assert response.status_code == 503
+
+    async def test_a_reranker_failure_makes_answer_return_503(
+        self, db_session: AsyncSession
+    ) -> None:
+        async with await self._client(db_session, RerankerError("unavailable")) as client:
+            response = await client.post("/retrieval/answer", json={"query": "What is TCP?"})
+
+        assert response.status_code == 503
+
+    async def test_an_embedding_failure_makes_answer_return_503(
+        self, db_session: AsyncSession
+    ) -> None:
+        async with await self._client(db_session, EmbeddingError("unavailable")) as client:
+            response = await client.post("/retrieval/answer", json={"query": "What is TCP?"})
+
+        assert response.status_code == 503

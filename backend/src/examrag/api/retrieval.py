@@ -13,6 +13,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from examrag.dependencies import get_llm_client, get_rag_pipeline
+from examrag.embeddings.embedding_generator import EmbeddingError
 from examrag.generation.answer_generator import AnswerGenerator
 from examrag.generation.llm_client import LLMClient, LLMError
 from examrag.rag.pipeline import RagPipeline
@@ -47,6 +48,8 @@ async def compare_retrieval(
         trace = await pipeline.retrieve(query)
     except RerankerError as exc:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
+    except EmbeddingError as exc:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
 
     return RetrievalComparison(
         query=request.query,
@@ -70,6 +73,8 @@ async def answer_question(
     except LLMError as exc:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
     except RerankerError as exc:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
+    except EmbeddingError as exc:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
 
     return AnswerResponse(

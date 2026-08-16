@@ -151,6 +151,47 @@ async def _fail(
     await session.commit()
 
 
+async def recover_interrupted_jobs(session: AsyncSession) -> int:
+    """Fail any job a previous process left mid-run.
+
+    A background task cannot survive the process exiting: if a job is still
+    `UPLOADED` or `PROCESSING`, nothing is actually working on it. Left alone
+    it stays stuck forever — the frontend polls a status that never changes,
+    and re-uploading the same file finds a document that is not `FAILED`, so
+    the retry-in-place logic in `api/upload.py` never fires for it either.
+    Marking it `FAILED` here is what makes that retry path reachable again.
+
+    Meant to run once, after migrations and before the API starts serving
+    traffic — see `scripts/recover_interrupted_jobs.py` and the `backend`
+    service command in docker-compose.yml — not as part of a request.
+
+    Returns:
+        The number of jobs recovered.
+    """
+    result = await session.execute(
+        select(IngestionJob).where(
+            IngestionJob.status.in_((ProcessingStatus.UPLOADED, ProcessingStatus.PROCESSING))
+        )
+    )
+    jobs = list(result.scalars())
+    if not jobs:
+        return 0
+
+    now = datetime.now(UTC)
+    for job in jobs:
+        job.status = ProcessingStatus.FAILED
+        job.error_message = "Ingestion was interrupted by a server restart."
+        job.finished_at = now
+
+        document = await session.get(Document, job.document_id)
+        if document is not None:
+            document.status = ProcessingStatus.FAILED
+
+    await session.flush()
+    logger.warning("Recovered %d interrupted ingestion job(s) on startup", len(jobs))
+    return len(jobs)
+
+
 def _normalized_hash(markdown: str) -> str:
     """Hash of the cleaned Markdown.
 

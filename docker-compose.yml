@@ -46,6 +46,7 @@ services:
       HF_HOME: /data/models
     command: >
       sh -c "alembic upgrade head &&
+             python -m examrag.scripts.recover_interrupted_jobs &&
              uvicorn examrag.main:app --host 0.0.0.0 --port 8000 --reload"
     ports:
       - "${API_PORT:-8000}:8000"

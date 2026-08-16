@@ -259,6 +259,56 @@ Recorded in [decisions.md](decisions.md):
 - A cluster's representative is its longest member
 - FAQ generation recomputes on every request; nothing is cached or stored
 
-### Not Started
+## Phase 4 — Stabilization, Optimization and Documentation
 
-- [ ] Phase 4 — Stabilization, optimization and documentation
+Scoped to hardening real rough edges found by reading the code, not a
+performance pass or a deployment change: the application stays local and
+single-user. Found by auditing each endpoint's error handling and the upload
+duplicate-protection path against what the codebase already documents about
+itself, rather than from a bug report.
+
+### Completed (2026-08-16)
+
+- [x] `ingestion_pipeline.recover_interrupted_jobs` — fails any job still
+      `UPLOADED` or `PROCESSING` at startup, since a background task cannot
+      survive the process that ran it exiting
+- [x] `scripts/recover_interrupted_jobs.py` — runs it as its own step in the
+      `backend` service's Docker Compose command, between `alembic upgrade
+      head` and `uvicorn`; deliberately not wired into FastAPI's `lifespan`
+- [x] `EmbeddingError` now returns `503` from `/retrieval/compare`,
+      `/retrieval/answer`, `/quizzes/generate` and `/faq/generate`, matching
+      the existing `RerankerError`/`LLMError` handling
+- [x] `/quizzes/generate` now catches retrieval failures from
+      `MCQGenerator.plan()`, not only from `generate()`
+- [x] A race between two uploads of the same brand-new file — both passing
+      the duplicate check before either commits — is caught as an
+      `IntegrityError` and resolved as an ordinary reuse, instead of an
+      unhandled `500`
+- [x] 14 new backend tests, all against the real database or the real HTTP
+      layer — no new frontend surface, so no new frontend tests
+
+### Verified end to end
+
+- A document manually set to `PROCESSING` (simulating a crash) is untouched by
+  re-upload until `recover_interrupted_jobs` runs, then re-upload retries it
+  in place — the exact failure chain the fix targets, exercised start to
+  finish in one test rather than asserted in pieces
+- `uv run python -m examrag.scripts.recover_interrupted_jobs` run against the
+  live `docker compose` database: connects, finds nothing stuck, exits cleanly
+- Full suite: `make check` — 348 backend tests, 44 frontend tests, `ruff
+  format --check`, `ruff check`, `mypy`, `tsc --noEmit` all clean
+
+### Problems
+
+- None new. The four fixes above were each found by reading a call site next
+  to its siblings (e.g. every other retrieval-backed endpoint already caught
+  `RerankerError`) rather than by something breaking during this phase.
+
+### Decisions
+
+Recorded in [decisions.md](decisions.md):
+
+- Crash recovery runs alongside migrations, not in FastAPI's lifespan
+- Re-uploading a document stuck at PROCESSING did nothing; recovery is what fixes it
+- `EmbeddingError` gets the same 503 treatment as `RerankerError` and `LLMError`
+- A raced duplicate upload is caught as an `IntegrityError`, not prevented

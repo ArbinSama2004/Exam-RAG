@@ -16,7 +16,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from examrag.database.connection import get_session
-from examrag.database.models import Document
+from examrag.database.models import Document, IngestionJob
 from examrag.enums import DocumentPurpose, DocumentType, IngestionStage, ProcessingStatus
 from examrag.main import create_app
 
@@ -150,6 +150,58 @@ async def test_the_same_file_uploaded_twice_is_reused(
     assert len(scheduled) == 1
 
 
+async def test_a_race_between_two_uploads_of_the_same_new_file_reuses_the_winner(
+    api: AsyncClient,
+    db_session: AsyncSession,
+    scheduled: list[uuid.UUID],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Two requests can both pass the duplicate check before either commits.
+
+    The loser only finds out from the database's own unique constraint when it
+    tries to insert. It must reuse the winner's row instead of surfacing an
+    unhandled 500.
+    """
+    import examrag.api.upload as upload_module
+
+    winner = Document(
+        id=uuid.uuid4(),
+        filename="notes.md",
+        document_type=DocumentType.MARKDOWN,
+        purpose=DocumentPurpose.STUDY_MATERIAL,
+        status=ProcessingStatus.UPLOADED,
+        stored_path="winner.md",
+        size_bytes=len(MARKDOWN),
+        original_file_hash=upload_module.content_hash(MARKDOWN),
+    )
+    db_session.add(winner)
+    db_session.add(IngestionJob(document_id=winner.id))
+    # Committed, not just flushed: this row must survive the loser's rollback
+    # below, the same way it would survive as a separate, already-committed
+    # request in production.
+    await db_session.commit()
+
+    real_find_existing = upload_module._find_existing
+    calls = 0
+
+    async def find_existing_once_blind(session: AsyncSession, file_hash: str, purpose: object):
+        nonlocal calls
+        calls += 1
+        # First call: the loser's own duplicate check, before it has seen the
+        # winner commit. Second call: this handler's post-conflict lookup.
+        return None if calls == 1 else await real_find_existing(session, file_hash, purpose)
+
+    monkeypatch.setattr(upload_module, "_find_existing", find_existing_once_blind)
+
+    response = await post_upload(api)
+
+    assert response.status_code == 202
+    assert response.json()["reused"] is True
+    assert response.json()["document"]["id"] == str(winner.id)
+    # The loser's attempt must not have been scheduled for processing.
+    assert scheduled == []
+
+
 async def test_the_same_file_may_be_uploaded_under_each_purpose(
     api: AsyncClient, scheduled: list[uuid.UUID]
 ) -> None:
@@ -181,6 +233,40 @@ async def test_a_failed_document_is_reprocessed_rather_than_reused(
     assert second.json()["document"]["id"] == first.json()["document"]["id"]
     assert second.json()["document"]["status"] == ProcessingStatus.UPLOADED.value
     assert second.json()["job_id"] != first.json()["job_id"]
+
+
+async def test_a_document_orphaned_by_a_crash_is_retryable_after_recovery(
+    api: AsyncClient, db_session: AsyncSession, scheduled: list[uuid.UUID]
+) -> None:
+    """The bug this exists to fix: before recovery, re-uploading did nothing.
+
+    A document stuck in `PROCESSING` (the backend died mid-run) is not
+    `FAILED`, so `upload_document`'s reuse branch returned it untouched on
+    re-upload — the frontend would show the same stuck progress bar forever.
+    Running `recover_interrupted_jobs`, exactly as the container's startup
+    command does, is what makes the existing retry-in-place logic reachable.
+    """
+    from examrag.ingestion.ingestion_pipeline import recover_interrupted_jobs
+
+    first = await post_upload(api)
+    document = await db_session.get(Document, uuid.UUID(first.json()["document"]["id"]))
+    assert document is not None
+    document.status = ProcessingStatus.PROCESSING
+    await db_session.flush()
+
+    stuck_again = await post_upload(api)
+    assert stuck_again.json()["reused"] is True
+    assert len(scheduled) == 1  # The stuck attempt was never rescheduled.
+
+    recovered = await recover_interrupted_jobs(db_session)
+    assert recovered == 1
+
+    retried = await post_upload(api)
+
+    assert retried.json()["reused"] is False
+    assert retried.json()["document"]["id"] == first.json()["document"]["id"]
+    assert retried.json()["document"]["status"] == ProcessingStatus.UPLOADED.value
+    assert len(scheduled) == 2
 
 
 async def test_retrying_restores_a_missing_upload_file(

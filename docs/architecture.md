@@ -213,6 +213,46 @@ exists with that `(file hash, purpose)`:
   retrying in place keeps the document id the frontend already holds. Writing
   the file again also recovers a document whose upload volume was cleared.
 
+Two uploads of the same brand-new file can both pass this check before either
+commits — a genuine race, not a hypothetical one, in an app with no
+authentication to slow down a double-click or a retried request. The loser's
+insert hits the `(original_file_hash, purpose)` constraint; `upload_document`
+catches that `IntegrityError`, rolls back, deletes the file it just wrote, and
+looks the document up again — which now finds the winner — so the loser
+response is an ordinary `reused: true` rather than an unhandled `500`.
+
+### Recovering from a crash
+
+Retry-in-place only ever fires for a document whose status is `FAILED`.
+Nothing sets a document to `FAILED` when the *process* dies mid-run — a
+background task cannot catch its own container being killed — so a document
+interrupted by a crash or a `docker compose down` mid-ingestion stays stuck at
+`PROCESSING` (or `UPLOADED`, if it was killed before that) forever. Before this
+was fixed, re-uploading such a document did nothing: the reuse branch above
+returned it untouched, since `PROCESSING` is not `FAILED`.
+
+`ingestion_pipeline.recover_interrupted_jobs` closes that gap: it marks every
+job still `UPLOADED` or `PROCESSING` as `FAILED`, on the reasoning that a
+background task cannot survive a restart, so anything found in either state
+when this runs was, by definition, orphaned by the previous process. Once
+`FAILED`, the existing retry-in-place logic is reachable again.
+
+This runs from `scripts/recover_interrupted_jobs.py`, invoked as its own step
+in the `backend` service's Docker Compose command — after `alembic upgrade
+head`, before `uvicorn` starts:
+
+```text
+alembic upgrade head → recover_interrupted_jobs → uvicorn (serving traffic)
+```
+
+It is deliberately **not** part of FastAPI's `lifespan`. Liveness
+(`GET /health`) must stay reachable even while the database is still starting
+— that is the whole reason liveness and readiness are separate endpoints — so
+nothing that requires a database belongs in application startup. Sequencing
+this after `alembic upgrade head`, which already requires the database, keeps
+that invariant intact while still running the sweep before any request could
+observe a stuck job.
+
 ## Retrieval
 
 ```text
@@ -264,6 +304,15 @@ about whichever part ranked highest.
 Model output is untrusted: shape validated, wrong option counts and duplicate
 options rejected, near-duplicate questions dropped, and passage citations
 resolved to real sources or dropped rather than misattributed.
+
+**Every model-backed endpoint translates the same three failure types the same
+way** — `RerankerError`, `LLMError` and `EmbeddingError` all become `503`, not
+an unhandled `500` with a stack trace — because all three mean the same thing
+to a caller: a model this request needed is not available right now, try
+again once it is. `POST /quizzes/generate` needs this in two places, not one:
+`plan()` retrieves before any model call, so a missing reranker or embedding
+model has to be caught there too, separately from the `generate()` call that
+catches `MCQGenerationError` and `LLMError`.
 
 ## Quizzes
 

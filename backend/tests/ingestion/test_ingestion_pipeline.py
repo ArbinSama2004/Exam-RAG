@@ -12,7 +12,7 @@ from examrag.embeddings.embedding_generator import EmbeddingError, EmbeddingGene
 from examrag.enums import DocumentPurpose, DocumentType, IngestionStage, ProcessingStatus
 from examrag.ingestion.chunker import CHUNKER_VERSION
 from examrag.ingestion.file_storage import save_upload
-from examrag.ingestion.ingestion_pipeline import run_ingestion
+from examrag.ingestion.ingestion_pipeline import recover_interrupted_jobs, run_ingestion
 
 MARKDOWN = b"""# Networking
 
@@ -208,3 +208,66 @@ async def test_ingestion_creates_a_job_when_none_exists(
 async def _jobs(session: AsyncSession, document: Document) -> list[IngestionJob]:
     await session.refresh(document, ["ingestion_jobs"])
     return list(document.ingestion_jobs)
+
+
+async def test_recovery_fails_a_job_stuck_processing(
+    db_session: AsyncSession, uploads: Path
+) -> None:
+    """A crash mid-run leaves PROCESSING behind; recovery is what unsticks it."""
+    document = await make_stored_document(db_session)
+    job = (await _jobs(db_session, document))[0]
+    job.status = ProcessingStatus.PROCESSING
+    job.stage = IngestionStage.EMBEDDING
+    document.status = ProcessingStatus.PROCESSING
+    await db_session.flush()
+
+    recovered = await recover_interrupted_jobs(db_session)
+
+    assert recovered == 1
+    await db_session.refresh(document)
+    await db_session.refresh(job)
+    assert document.status is ProcessingStatus.FAILED
+    assert job.status is ProcessingStatus.FAILED
+    assert "interrupted" in (job.error_message or "").lower()
+    assert job.finished_at is not None
+
+
+async def test_recovery_fails_a_job_never_started(db_session: AsyncSession, uploads: Path) -> None:
+    """UPLOADED with nobody working on it is exactly as orphaned as PROCESSING."""
+    document = await make_stored_document(db_session)
+
+    recovered = await recover_interrupted_jobs(db_session)
+
+    assert recovered == 1
+    await db_session.refresh(document)
+    assert document.status is ProcessingStatus.FAILED
+
+
+async def test_recovery_leaves_ready_documents_alone(
+    db_session: AsyncSession, generator: EmbeddingGenerator, uploads: Path
+) -> None:
+    document = await make_stored_document(db_session)
+    await run_ingestion(db_session, document, generator)
+
+    recovered = await recover_interrupted_jobs(db_session)
+
+    assert recovered == 0
+    assert document.status is ProcessingStatus.READY
+
+
+async def test_recovery_leaves_already_failed_documents_alone(
+    db_session: AsyncSession, uploads: Path
+) -> None:
+    document = await make_stored_document(db_session)
+    await run_ingestion(db_session, document, EmbeddingGenerator(encoder=FailingEncoder()))
+    job = (await _jobs(db_session, document))[0]
+    original_message = job.error_message
+
+    recovered = await recover_interrupted_jobs(db_session)
+
+    assert recovered == 0
+    assert job.error_message == original_message
+
+
+async def test_recovery_with_nothing_stuck_is_a_no_op(db_session: AsyncSession) -> None:
+    assert await recover_interrupted_jobs(db_session) == 0

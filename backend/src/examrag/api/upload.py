@@ -20,6 +20,7 @@ from fastapi import (
     status,
 )
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from examrag.config import Settings, get_settings
@@ -28,7 +29,7 @@ from examrag.database.models import Document, IngestionJob
 from examrag.enums import DocumentPurpose, ProcessingStatus
 from examrag.ingestion.document import UnsupportedDocumentTypeError
 from examrag.ingestion.document_loader import detect_document_type
-from examrag.ingestion.file_storage import content_hash, save_upload
+from examrag.ingestion.file_storage import content_hash, delete_upload, save_upload
 from examrag.ingestion.ingestion_pipeline import process_document
 from examrag.schemas.document import (
     DocumentDetail,
@@ -104,7 +105,25 @@ async def upload_document(
 
     job = IngestionJob(document_id=document.id)
     session.add_all([document, job])
-    await session.commit()
+    try:
+        await session.commit()
+    except IntegrityError:
+        # Two uploads of the same new file raced: both passed the
+        # `_find_existing` check above before either had committed, so this
+        # is the loser finding out only now, from the unique constraint. The
+        # winner's row is what should exist, so discard this attempt and
+        # reuse it — the same outcome as any other duplicate upload.
+        await session.rollback()
+        delete_upload(document.stored_path)
+        existing = await _find_existing(session, file_hash, purpose)
+        if existing is None:
+            raise
+        logger.info("Lost a duplicate-upload race for %s; reusing %s", filename, existing.id)
+        job = await _latest_job(session, existing)
+        return UploadResponse(
+            document=DocumentSummary.model_validate(existing), job_id=job.id, reused=True
+        )
+
     await session.refresh(document)
     await session.refresh(job)
 
