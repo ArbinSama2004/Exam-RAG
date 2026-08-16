@@ -25,16 +25,16 @@ state in PostgreSQL.
 | ------ | -------------- | ------ |
 | `main.py` | Application factory: settings, logging, CORS, routers, lifespan | Implemented |
 | `config.py` | Environment-driven settings, database URL construction | Implemented |
-| `api/` | HTTP routers; thin, delegating to services | `health`, `upload`, `mcq`, `retrieval` |
+| `api/` | HTTP routers; thin, delegating to services | `health`, `upload`, `mcq`, `retrieval`, `faq` |
 | `database/` | Async engine, session factory, ORM models, chunk/vector storage | Implemented |
 | `enums.py` | Domain enumerations shared by models, schemas and API | Implemented |
-| `schemas/` | Pydantic request/response models | `health`, `document`, `mcq`, `retrieval` |
+| `schemas/` | Pydantic request/response models | `health`, `document`, `mcq`, `retrieval`, `faq` |
 | `ingestion/` | Loading, normalization, cleaning, chunking, file storage, pipeline | Implemented |
 | `embeddings/` | Embedding generation | Implemented |
 | `retrieval/` | `base`, `filters`, `vector_search`, `keyword_search`, `fusion`, `reranker` | Implemented |
 | `rag/` | Orchestration: pipeline and context building | Implemented |
 | `generation/` | LLM client, prompt building, MCQ and answer generation | Implemented |
-| `faq/` | Question extraction, normalization, clustering, frequency analysis | Phase 3 |
+| `faq/` | Question extraction, normalization, clustering, frequency analysis | Implemented |
 
 `main.py` contains no pipeline logic. Business logic stays out of route
 handlers.
@@ -284,6 +284,43 @@ oracle for the correct option.
 same pipeline, so the comparison screen shows the system in use rather than a
 parallel implementation.
 
+## Past paper FAQ generator
+
+```text
+Past-paper chunks ─► extract questions ─► normalize ─► embed ─► cluster ─► rank by frequency
+```
+
+No LLM and no new database table. Past papers are ingested through the same
+pipeline as study material — they get no special chunking — so the FAQ
+generator works entirely from chunks that already exist:
+
+| Stage | Module | What it does |
+| ----- | ------ | ------------- |
+| Extraction | `faq/question_extractor.py` | Regex over a chunk's content: a line opening with a marker (`1.`, `Q2`, `(a)`, `b)`) starts a question, and every line after it belongs to that question until the next marker or a blank line. This works because `markdown_cleaner`'s `_STRUCTURAL_LINE` rule already keeps a numbered line's break intact rather than reflowing it — the same rule that protects list items. |
+| Normalization | `faq/question_normalizer.py` | Strips trailing mark/point allocations (`[10 marks]`, `(5 points)`), folds curly quotes and dashes, collapses whitespace — noise a similarity model would otherwise latch onto over the actual question. |
+| Clustering | `faq/question_clusterer.py` | Embeds every normalized question with the same model retrieval uses, then a single greedy pass assigns each to the nearest existing cluster centroid if the cosine similarity clears `DEFAULT_SIMILARITY_THRESHOLD` (0.83), else starts a new cluster. Pure numpy — no scikit-learn, since nothing else in the project needs it yet. |
+| Ranking | `faq/faq_pipeline.py` | Orchestrates the above, then sorts clusters by occurrence count. A cluster's representative is its longest member — usually the most complete phrasing — and its other phrasings are kept as variants. |
+
+Extraction is a heuristic, the same trade-off `pdf_to_markdown`'s heading
+inference makes: an unusually formatted paper can produce a missed or
+malformed question, which degrades one entry in the list rather than breaking
+ingestion.
+
+`POST /faq/generate` recomputes on every call rather than reading a stored
+result. Nothing here is slow enough to justify caching — extraction is regex,
+clustering is a few hundred dot products — and caching would risk serving a
+result that predates a past paper uploaded a minute ago. The same purpose and
+readiness filters `retrieval/filters.py` applies are applied here: study
+material is never a source of exam questions, and a document still ingesting
+has incomplete chunks.
+
+The clustering threshold was picked empirically, not guessed: a hand-labeled
+set of 15 questions (4 groups of paraphrased repeats, 5 distractors) run
+through the real embedding model scores precision 1.00, recall 0.88, F1 0.93
+at 0.83. This is Phase 3's evaluation, and it runs as an opt-in test —
+`EXAMRAG_TEST_REAL_MODEL=1 uv run pytest tests/faq/test_clustering_evaluation.py -s` —
+since a fake encoder cannot tell a paraphrase from a distractor.
+
 ## Data model
 
 ```text
@@ -349,6 +386,10 @@ src/
 ├── components/IngestionProgress.tsx# Polls one document to READY or FAILED
 ├── components/DocumentList.tsx     # Uploaded documents and their status
 ├── components/BackendStatus.tsx    # Backend reachability
+├── components/QuizSetup.tsx        # Choose documents and settings, generate a quiz
+├── components/Quiz.tsx             # Answer questions, one at a time
+├── components/RetrievalComparison.tsx # One query through all four retrieval methods
+├── components/FaqGenerator.tsx     # Past papers in, ranked repeated questions out
 ├── services/api.ts                 # Typed backend calls, base URL, errors
 └── test/                           # Vitest setup and render helper
 ```
@@ -381,3 +422,6 @@ Component tests run under Vitest with Testing Library and a stubbed `fetch`.
   chunker version) so stored vectors stay traceable when a model changes.
 - **Retrieval tuning** — candidate counts become environment variables in
   Phase 2, so evaluation does not require code changes.
+- **FAQ clustering** — `cluster_questions` takes a threshold and a list of
+  vectors, nothing else. A future corpus large enough to need better-than-greedy
+  clustering would replace the function body, not its callers.

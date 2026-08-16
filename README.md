@@ -4,10 +4,10 @@ A local, single-user RAG application for exam preparation. Upload your study
 material and past question papers, then generate practice MCQs and discover the
 questions that keep coming back.
 
-> **Status: Phases 1 and 2 are complete.** Upload documents, generate
-> RAG-grounded MCQ quizzes, take them with server-side scoring, and inspect how
-> each retrieval method performs on the same query. The FAQ generator arrives
-> in Phase 3.
+> **Status: Phases 1 through 3 are complete.** Upload documents, generate
+> RAG-grounded MCQ quizzes, take them with server-side scoring, inspect how
+> each retrieval method performs on the same query, and find the exam
+> questions that keep coming back across past papers.
 
 ## Features
 
@@ -18,7 +18,7 @@ questions that keep coming back.
 - **Retrieval comparison** — vector, keyword, hybrid and reranked, side by side
   *(done)*
 - **Past paper FAQ generator** — finds semantically repeated exam questions and
-  how often they appear *(Phase 3)*
+  how often they appear *(done)*
 
 ## Architecture overview
 
@@ -84,6 +84,7 @@ database migrations and starts the backend and frontend.
 | `POST /quizzes/{id}/submit` | Final score and review. |
 | `POST /retrieval/compare` | One query through vector, keyword, hybrid and reranked retrieval. |
 | `POST /retrieval/answer` | A grounded answer with its sources. |
+| `POST /faq/generate` | Questions extracted from past papers, grouped by meaning and ranked by how often they repeat. |
 | `GET /health`, `GET /health/ready` | Liveness and readiness (readiness also reports the LLM). |
 
 Try it:
@@ -203,3 +204,6 @@ Progress is tracked in [docs/progress.md](docs/progress.md).
 - The first upload downloads the embedding model (about 90 MB). It is cached on
   the `model_cache` volume afterwards.
 - Embeddings run on CPU. The backend image is around 3.8 GB, most of it PyTorch.
+- Past-paper question extraction is regex-based, matched to how numbered
+  questions actually render in Markdown. An unusually formatted paper can miss
+  or malform a question; it degrades one FAQ entry rather than the ingestion.

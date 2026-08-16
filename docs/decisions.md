@@ -473,3 +473,110 @@ say this and show how to switch to a pulled local model on hardware that can run
 one. The `LLMClient` protocol means that switch is a configuration change.
 
 **Date:** 2026-08-16
+
+---
+
+## FAQ extraction relies on the cleaner's structural-line rule, not a new parser
+
+**Decision:** `question_extractor.py` finds questions by matching numbering
+markers (`1.`, `Q2`, `(a)`, `b)`) at the start of a line within a chunk's
+content, then absorbing following lines until the next marker or a blank line.
+
+**Reason:** `markdown_cleaner._STRUCTURAL_LINE` already treats a numbered line
+(`\d+[.)]\s`) the same way it treats a list item: its line break is kept
+rather than reflowed into the surrounding prose. That is what makes a
+numbered exam question recoverable from stored chunk content without a second
+pass over the original PDF or a bespoke past-paper parser — the structure
+extraction depends on was preserved for an unrelated reason (protecting list
+items) and turns out to protect question numbering too.
+
+This is a heuristic, and an unusually formatted past paper can miss or
+malform a question — the same trade-off `pdf_to_markdown`'s heading inference
+already makes for the same reason: a PDF carries no explicit structure to
+parse, only text that a good heuristic can mostly recover.
+
+**Date:** 2026-08-16
+
+---
+
+## Clustering is a dependency-free greedy pass, not scikit-learn
+
+**Decision:** `question_clusterer.py` assigns each question to the nearest
+existing cluster centroid by cosine similarity, using plain numpy, rather than
+adding scikit-learn for `AgglomerativeClustering` or `DBSCAN`.
+
+**Reason:** The same reasoning as every other dependency in this project:
+added by the task that needs it, not upfront. A single past paper's worth of
+questions is tens to a few hundred items — small enough that an O(n·k) greedy
+pass against running centroids costs milliseconds, and numpy is already a
+direct dependency of embeddings. Reaching for scikit-learn here would need
+nothing scikit-learn offers that this doesn't already do at this scale.
+
+The trade-off is real: single-pass greedy clustering is order-dependent and
+will occasionally split into two clusters what a global method would merge
+into one. That is judged acceptable because clustering quality is measured
+directly — see the labeled-set evaluation below — rather than assumed from
+the algorithm's reputation.
+
+**Date:** 2026-08-16
+
+---
+
+## The similarity threshold is chosen from a labeled evaluation, not guessed
+
+**Decision:** `DEFAULT_SIMILARITY_THRESHOLD = 0.83`, picked by running the real
+embedding model over a hand-labeled set of 15 past-paper-style questions (4
+groups of 2–3 paraphrased repeats, 5 unrelated distractors) and choosing the
+threshold that scores well on pairwise precision/recall. At 0.83 the labeled
+set scores precision 1.00, recall 0.88, F1 0.93.
+
+**Reason:** This is Phase 3's evaluation requirement. A clustering threshold
+picked without measurement is just a guess dressed up as a constant, and the
+two failure directions have different costs: too low merges genuinely
+different questions into one misleading FAQ entry; too high hides real
+repeats as unrelated singletons. Measuring against hand labels makes the
+trade-off visible instead of assumed, and gives future threshold changes
+something concrete to compare against.
+
+The evaluation needs the real model — a fake or hash-based encoder cannot
+distinguish a paraphrase from a distractor — so it runs as an opt-in test
+(`EXAMRAG_TEST_REAL_MODEL=1 uv run pytest tests/faq/test_clustering_evaluation.py -s`),
+the same convention the embedding suite already uses for its own real-model
+test.
+
+**Date:** 2026-08-16
+
+---
+
+## A cluster's representative is its longest member
+
+**Decision:** `faq_pipeline._build_cluster` picks the longest normalized
+question in a cluster as the representative shown to the user; the rest are
+kept as variants.
+
+**Reason:** A shorter member of a genuine duplicate cluster is more often a
+paraphrase that dropped a clause, or an extraction that missed a continuation
+line, than a meaningfully different question — the longest phrasing is the
+best available proxy for the most complete one, without adding a second
+embedding comparison (distance to centroid) to pick a "typical" member
+instead.
+
+**Date:** 2026-08-16
+
+---
+
+## FAQ generation recomputes on every request; nothing is cached or stored
+
+**Decision:** `POST /faq/generate` runs extraction, embedding and clustering
+fresh on every call. No FAQ table, no stored cluster, no invalidation logic.
+
+**Reason:** Nothing in the pipeline is slow enough to justify caching —
+extraction is regex over already-loaded chunks, and clustering a paper's worth
+of questions is a few hundred dot products. Caching would add a staleness
+problem (a newly uploaded past paper not reflected until some invalidation
+fires) to solve a performance problem that does not exist yet. This mirrors
+`POST /retrieval/compare`: compute-on-read where computing is cheap, store
+server-side state only where correctness requires it (quizzes, because the
+answer key must not reach the browser early).
+
+**Date:** 2026-08-16

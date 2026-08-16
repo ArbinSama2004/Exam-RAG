@@ -1,8 +1,7 @@
 /**
  * Typed access to the ExamRAG backend API.
  *
- * MCQ and FAQ calls are added in the phases that implement them; this module
- * owns the base URL, the response types and the error convention.
+ * This module owns the base URL, the response types and the error convention.
  */
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
@@ -242,5 +241,36 @@ export function compareRetrieval(query: string, documentIds: string[]): Promise<
   return postJson<RetrievalComparison>("/retrieval/compare", {
     query,
     document_ids: documentIds,
+  });
+}
+
+export interface FaqSource {
+  document_id: string;
+  filename: string;
+  page_number: number | null;
+  heading: string | null;
+}
+
+export interface FaqCluster {
+  representative: string;
+  occurrence_count: number;
+  document_count: number;
+  variants: string[];
+  sources: FaqSource[];
+}
+
+export interface FaqGenerateResponse {
+  question_count: number;
+  document_count: number;
+  clusters: FaqCluster[];
+}
+
+export function generateFaqs(input: {
+  documentIds: string[];
+  minOccurrences: number;
+}): Promise<FaqGenerateResponse> {
+  return postJson<FaqGenerateResponse>("/faq/generate", {
+    document_ids: input.documentIds,
+    min_occurrences: input.minOccurrences,
   });
 }

@@ -2,6 +2,7 @@ import { useState } from "react";
 
 import { BackendStatus } from "../components/BackendStatus";
 import { DocumentList } from "../components/DocumentList";
+import { FaqGenerator } from "../components/FaqGenerator";
 import { IngestionProgress } from "../components/IngestionProgress";
 import { Quiz } from "../components/Quiz";
 import { QuizSetup } from "../components/QuizSetup";
@@ -9,15 +10,16 @@ import { RetrievalComparison } from "../components/RetrievalComparison";
 import { UploadForm } from "../components/UploadForm";
 import type { QuizPublic } from "../services/api";
 
-type Tab = "documents" | "mcq" | "retrieval";
+type Tab = "documents" | "mcq" | "retrieval" | "faq";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "documents", label: "Documents" },
   { id: "mcq", label: "MCQ generator" },
   { id: "retrieval", label: "Retrieval comparison" },
+  { id: "faq", label: "Past paper FAQ" },
 ];
 
-/** Application shell. The FAQ generator is added in Phase 3. */
+/** Application shell. */
 export function HomePage() {
   const [tab, setTab] = useState<Tab>("documents");
   const [active, setActive] = useState<{ id: string; filename: string } | null>(null);
@@ -65,6 +67,8 @@ export function HomePage() {
         ))}
 
       {tab === "retrieval" && <RetrievalComparison />}
+
+      {tab === "faq" && <FaqGenerator />}
     </main>
   );
 }

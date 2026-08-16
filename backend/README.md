@@ -6,17 +6,20 @@ FastAPI backend for ExamRAG. Managed with [uv](https://docs.astral.sh/uv/) and P
 
 ```text
 src/examrag/
-├── main.py           # FastAPI application factory (wiring only)
-├── config.py         # Environment-driven settings
-├── api/              # HTTP routers (health.py today)
-├── database/         # Async engine, session factory, declarative Base
-└── schemas/          # Pydantic request/response models
-alembic/              # Database migrations
-tests/                # pytest suite
+├── main.py        # FastAPI application factory (wiring only)
+├── config.py      # Environment-driven settings
+├── api/           # HTTP routers: health, upload, mcq, retrieval, faq
+├── database/      # Async engine, session factory, ORM models, vector store
+├── ingestion/     # Loading, cleaning, chunking, file storage, pipeline
+├── embeddings/    # Embedding generation
+├── retrieval/     # Vector, keyword, fusion, reranking
+├── rag/           # Pipeline orchestration, context building
+├── generation/    # LLM client, prompt building, MCQ and answer generation
+├── faq/           # Question extraction, normalization, clustering
+└── schemas/       # Pydantic request/response models
+alembic/           # Database migrations
+tests/             # pytest suite
 ```
-
-Modules for `ingestion/`, `embeddings/`, `retrieval/`, `generation/` and `faq/`
-are added in the phases that implement them.
 
 ## Local development
 

@@ -120,10 +120,6 @@ Task 6 — Upload endpoint, jobs, background processing, duplicates (2026-08-16)
 - Answering revealed the key only after committing; re-answering returned 409
 - The generated quiz response contained no `correct_index` or `explanation`
 
-### In Progress
-
-- [ ] Phase 3 — Past paper FAQ generator and evaluation
-
 ### Problems
 
 - `pydantic-settings` JSON-decodes list-typed fields before validators run, so
@@ -207,3 +203,62 @@ Recorded in [decisions.md](decisions.md):
 - Retrieval components behind one interface, fusion over ranks
 - MCQ generation split into a database phase and a model phase
 - Quizzes stored server-side so the answer key never reaches the browser early
+
+## Phase 3 — Past Paper FAQ Generator and Evaluation
+
+### Completed (2026-08-16)
+
+- [x] `faq/question_extractor.py` — marker-anchored extraction over stored
+      chunk content, reusing `markdown_cleaner`'s structural-line preservation
+- [x] `faq/question_normalizer.py` — strips mark/point allocations, folds
+      curly quotes and dashes, collapses whitespace
+- [x] `faq/question_clusterer.py` — greedy nearest-centroid cosine clustering
+      over numpy, no new dependency
+- [x] `faq/faq_pipeline.py` — orchestration: query READY past papers, extract,
+      normalize, embed, cluster, rank by occurrence count
+- [x] `POST /faq/generate` — scoped to specific past papers or all of them,
+      with a `min_occurrences` filter; recomputes on every call
+- [x] Frontend: `FaqGenerator.tsx` — select past papers, choose a minimum
+      repeat count, ranked results with expandable sources and variants
+- [x] Evaluation: a hand-labeled set of 15 past-paper-style questions (4
+      groups of paraphrased repeats, 5 distractors), scored with pairwise
+      precision/recall/F1 against the real embedding model
+- [x] 40 new backend tests (unit: extractor, normalizer, clusterer; database:
+      pipeline query and filtering; API: `/faq/generate`; evaluation: opt-in
+      real-model clustering quality) and 7 new frontend tests
+
+### Verified end to end
+
+- Clustering evaluation at `DEFAULT_SIMILARITY_THRESHOLD = 0.83`: precision
+  1.00, recall 0.88, F1 0.93 over the 15-question labeled set, run with
+  `EXAMRAG_TEST_REAL_MODEL=1` against the real `all-MiniLM-L6-v2` model
+- Full backend suite (`uv run pytest`) and frontend suite (`npm run test`)
+  pass, alongside `ruff format --check`, `ruff check`, `mypy` and `tsc --noEmit`
+
+### Problems
+
+- Numbered exam questions are not converted into Markdown list items by
+  `pdf_to_markdown` (only glyph bullets are); they were expected to need a
+  bespoke parser. They turned out to already be recoverable because
+  `markdown_cleaner._STRUCTURAL_LINE` preserves any line starting with
+  `\d+[.)]\s` for the same reason it preserves list items — extraction reuses
+  that instead of adding a second heuristic.
+- A hash-based fake encoder (identical text → identical vector, otherwise
+  orthogonal) is enough to test the pipeline's plumbing — filtering, scoping,
+  ranking — but cannot test whether real paraphrases actually cluster
+  together. That question needed its own opt-in test against the real model,
+  which is also Phase 3's evaluation deliverable.
+
+### Decisions
+
+Recorded in [decisions.md](decisions.md):
+
+- FAQ extraction relies on the cleaner's structural-line rule, not a new parser
+- Clustering is a dependency-free greedy pass, not scikit-learn
+- The similarity threshold is chosen from a labeled evaluation, not guessed
+- A cluster's representative is its longest member
+- FAQ generation recomputes on every request; nothing is cached or stored
+
+### Not Started
+
+- [ ] Phase 4 — Stabilization, optimization and documentation
