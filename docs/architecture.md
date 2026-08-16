@@ -29,7 +29,7 @@ state in PostgreSQL.
 | `database/` | Async engine, session factory, declarative `Base`, ORM models | Connection layer and models implemented |
 | `enums.py` | Domain enumerations shared by models, schemas and API | Implemented |
 | `schemas/` | Pydantic request/response models | `health.py` implemented |
-| `ingestion/` | Loading, Markdown normalization, cleaning, chunking | Phase 1, later tasks |
+| `ingestion/` | Loading, Markdown normalization, cleaning, chunking | Loading and conversion implemented |
 | `embeddings/` | Embedding generation | Phase 1, later tasks |
 | `retrieval/` | `base`, `vector_search`, `keyword_search`, `fusion`, `reranker` | Phase 2 |
 | `rag/` | Orchestration: pipeline and context building | Phase 2 |
@@ -53,6 +53,34 @@ into routes as a FastAPI dependency, which makes it overridable in tests.
 dependency; tests override that dependency instead of touching a real database.
 `Base` is the single declarative base, and Alembic autogeneration reads its
 metadata.
+
+## Document loading and normalization
+
+```text
+PDF ──► pdf_to_markdown  ─┐
+DOCX ─► docx_to_markdown ─┼─► LoadedDocument(pages: [DocumentPage]) ─► cleaning ─► chunking
+MD/TXT ───────────────────┘
+```
+
+`document_loader.py` is the single entry point. It resolves the format from the
+file extension and delegates; it performs no conversion itself.
+
+Every format produces the same shape — a `LoadedDocument` holding ordered
+`DocumentPage` values, each with Markdown and an optional page number. Page
+numbers are captured here because this is the last point at which the source
+layout is known, and chunk-level source attribution depends on them. Formats
+without pagination (DOCX, Markdown, TXT) produce a single page with
+`number = None`, so nothing downstream has to invent one.
+
+| Module | Approach |
+| ------ | -------- |
+| `pdf_to_markdown.py` | PyMuPDF. A PDF has no structure, only positioned text, so headings are inferred: the body font size is the most common size weighted by character count, and a line is a heading when its font is proportionally larger, or when it is entirely bold and short. Bullet glyphs become list items. One Markdown page per PDF page. |
+| `docx_to_markdown.py` | python-docx. DOCX carries real structure, so nothing is inferred: `Heading N`, `Title`, `Subtitle`, list and quote styles map directly to Markdown. Tables become Markdown tables. Paragraphs and tables are read from the document body in XML order, because python-docx exposes them as separate collections that lose their relative order. |
+| `document_loader.py` | Markdown passes through unchanged; plain text is treated as Markdown without markup. Decoding tries UTF-8 then CP-1252, and a UTF-8 BOM is stripped. |
+
+Failures raise `DocumentLoadError`, or `UnsupportedDocumentTypeError` for an
+extension outside PDF/DOCX/MD/TXT — the two exceptions the upload endpoint will
+translate into responses.
 
 ## Data model
 

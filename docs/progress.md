@@ -32,13 +32,24 @@ Task 2 — Database entities and migrations (2026-08-16)
 - [x] 22 new tests (12 model-level, 10 against a real database, auto-skipped
       when none is reachable) — 35 passing in total
 
+Task 3 — Document loading and Markdown normalization (2026-08-16)
+
+- [x] `DocumentPage` / `LoadedDocument` as the shared normalized representation
+- [x] PDF loading through PyMuPDF, one Markdown page per PDF page
+- [x] Heading inference from relative font size, plus short bold lines
+- [x] Bullet glyphs converted to Markdown list items
+- [x] DOCX loading through python-docx: heading, list and quote styles, tables
+- [x] Paragraph and table order preserved from the document body XML
+- [x] Markdown and TXT loading with UTF-8 then CP-1252 decoding, BOM stripped
+- [x] `DocumentLoadError` and `UnsupportedDocumentTypeError` for the upload endpoint
+- [x] 42 tests building real PDF and DOCX files — 77 passing in total
+
 ### In Progress
 
-- [ ] Task 3 — document loading and Markdown normalization (PDF, DOCX, MD, TXT)
+- [ ] Task 4 — Markdown cleaning and chunking
 
 ### Not Started
 
-- [ ] Task 4 — Markdown cleaning and chunking
 - [ ] Task 5 — embedding generation and vector storage
 - [ ] Task 6 — upload endpoint, ingestion jobs, background processing, duplicate protection
 - [ ] Task 7 — frontend upload UI and status polling
@@ -51,6 +62,11 @@ Task 2 — Database entities and migrations (2026-08-16)
 - Reusing one `Enum` type across two tables makes SQLAlchemy attempt
   `CREATE TYPE` twice. Migration `0002` creates every enum type explicitly up
   front instead (Task 2).
+- CP-1252 defines almost every byte, so the text decoding fallback rarely
+  fails. That is acceptable for user-supplied text files, but it means
+  `DocumentLoadError` for undecodable text is a narrow case (Task 3).
+- PyMuPDF ships incomplete type annotations, so `pdf_to_markdown` needs a
+  narrow mypy override for untyped calls (Task 3).
 
 ### Decisions
 
@@ -64,3 +80,5 @@ Recorded in [decisions.md](decisions.md):
 - `content_tsv` as a database-generated column
 - Embedding dimensionality as a code constant, not a setting
 - Documents unique per `(file hash, purpose)`
+- Markdown as the normalized representation, with page numbers preserved
+- Heading inference from font metrics for PDF, explicit styles for DOCX

@@ -4,10 +4,10 @@ A local, single-user RAG application for exam preparation. Upload your study
 material and past question papers, then generate practice MCQs and discover the
 questions that keep coming back.
 
-> **Status:** Phase 1 Tasks 1–2 are complete: project foundation and the
-> database schema for documents, ingestion jobs and chunks. Document loading,
-> chunking, embeddings, retrieval, MCQ generation and FAQ analysis are not
-> implemented yet.
+> **Status:** Phase 1 Tasks 1–3 are complete: project foundation, the database
+> schema, and document loading with normalization into Markdown. Chunking,
+> embeddings, the upload endpoint, retrieval, MCQ generation and FAQ analysis
+> are not implemented yet.
 
 ## Features
 
@@ -33,6 +33,7 @@ See [docs/architecture.md](docs/architecture.md) for detail.
 | Layer    | Technology |
 | -------- | ---------- |
 | Backend  | Python 3.12, FastAPI, Uvicorn, Pydantic v2, SQLAlchemy 2 (async), Alembic |
+| Documents | PyMuPDF (PDF), python-docx (DOCX) |
 | Database | PostgreSQL 17 with pgvector |
 | Frontend | React, TypeScript, Vite, TanStack Query |
 | Tooling  | uv, pytest, Ruff, mypy, Docker Compose, Make |

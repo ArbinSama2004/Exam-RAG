@@ -13,6 +13,8 @@ dependencies = [
     "asyncpg>=0.30.0",
     "alembic>=1.14.0",
     "pgvector>=0.3.6",
+    "pymupdf>=1.25.0",
+    "python-docx>=1.1.2",
 ]
 
 [project.optional-dependencies]
@@ -58,10 +60,20 @@ plugins = ["pydantic.mypy"]
 module = "tests.*"
 disallow_untyped_defs = false
 
+# PyMuPDF ships incomplete annotations, so its calls read as untyped.
+[[tool.mypy.overrides]]
+module = "examrag.ingestion.pdf_to_markdown"
+disallow_untyped_calls = false
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
 addopts = "-q --strict-markers"
+filterwarnings = [
+    # PyMuPDF's SWIG bindings emit these on import; nothing we can act on.
+    "ignore:builtin type Swig.* has no __module__ attribute:DeprecationWarning",
+    "ignore:builtin type swigvarlink has no __module__ attribute:DeprecationWarning",
+]
 
 [tool.coverage.run]
 source = ["src/examrag"]

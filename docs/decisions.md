@@ -126,13 +126,54 @@ pipelines.
 
 ## Dependencies are added when the feature that uses them lands
 
-**Decision:** Only FastAPI, Uvicorn, Pydantic v2, pydantic-settings,
-SQLAlchemy (async), asyncpg and Alembic are installed today, with pytest,
-pytest-asyncio, pytest-cov, httpx, Ruff and mypy for development.
+**Decision:** Each dependency is added by the task that first uses it, not
+upfront. So far: FastAPI, Uvicorn, Pydantic v2, pydantic-settings, SQLAlchemy
+(async), asyncpg and Alembic (Task 1); pgvector (Task 2); PyMuPDF and
+python-docx (Task 3). Development tooling is pytest, pytest-asyncio,
+pytest-cov, httpx, Ruff and mypy.
 
-**Reason:** The full stack is decided upfront, but installing PyMuPDF,
-python-docx, sentence-transformers, NumPy and scikit-learn before their
-features exist slows every install and Docker build and makes it unclear which
-dependencies are actually in use. They are added in the tasks that need them.
+**Reason:** The full stack is decided upfront, but installing
+sentence-transformers, NumPy and scikit-learn before their features exist slows
+every install and Docker build and makes it unclear which dependencies are
+actually in use. They arrive with the tasks that need them.
+
+**Date:** 2026-08-16
+
+---
+
+## Markdown is the normalized representation, with page numbers preserved
+
+**Decision:** Every supported format is converted to a `LoadedDocument` holding
+ordered `DocumentPage` values, each with Markdown and an optional page number,
+rather than to one flat string.
+
+**Reason:** The specification requires that generated answers be traceable to
+their source, which means chunks need page numbers. Conversion is the last
+point at which the source layout is known — once pages are concatenated, the
+information is gone and cannot be recovered. Formats without pagination use
+`number = None` instead of a fabricated value, so downstream code never mistakes
+an invented page for a real one.
+
+**Date:** 2026-08-16
+
+---
+
+## Headings are inferred for PDF and read directly for DOCX
+
+**Decision:** `pdf_to_markdown` derives heading levels from font size relative
+to the document's body text (plus short fully-bold lines), while
+`docx_to_markdown` maps the paragraph styles the file already carries.
+
+**Reason:** The two formats genuinely differ. DOCX names its structure, so
+inferring anything there would be worse than reading it. A PDF carries only
+positioned text with font metrics, and headings are needed — Phase 2 must
+distribute "all topics" MCQ generation across document sections, which requires
+knowing where sections begin. The body size is estimated as the most common
+size weighted by character count, so a document that opens with a large title
+does not mistake the title for body text.
+
+The heuristic is a heuristic: an unusually styled PDF may produce imperfect
+levels. Because chunking consumes headings as metadata rather than as control
+flow, a wrong level degrades attribution quality without breaking ingestion.
 
 **Date:** 2026-08-16
