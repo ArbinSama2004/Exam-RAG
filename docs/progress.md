@@ -70,13 +70,25 @@ Task 5 — Embedding generation and vector storage (2026-08-16)
 - [x] CPU-only torch wheels on Linux: backend image 17.7 GB to 3.78 GB
 - [x] 24 new tests — 148 passing in total
 
+Task 6 — Upload endpoint, jobs, background processing, duplicates (2026-08-16)
+
+- [x] `POST /documents` with required `STUDY_MATERIAL` / `PAST_PAPER` purpose
+- [x] `GET /documents`, `GET /documents/{id}`, `GET /documents/{id}/status`
+- [x] File storage keyed by document id, with SHA-256 hashing
+- [x] Ingestion pipeline: load, clean, chunk, embed, index
+- [x] FastAPI background processing in its own session, queued after commit
+- [x] Stage committed as it starts, so polling shows real progress
+- [x] Failures recorded as `FAILED` with the exception message
+- [x] Duplicate uploads reused; failed ones retried in place
+- [x] Validation: unsupported type and empty file `400`, oversized `413`
+- [x] `MAX_UPLOAD_MB` setting
+- [x] 30 new tests — 178 passing in total
+
 ### In Progress
 
-- [ ] Task 6 — upload endpoint, ingestion jobs, background processing, duplicate protection
+- [ ] Task 7 — frontend upload UI and status polling
 
 ### Not Started
-
-- [ ] Task 7 — frontend upload UI and status polling
 
 ### Problems
 
@@ -105,6 +117,16 @@ Task 5 — Embedding generation and vector storage (2026-08-16)
 - sentence-transformers 5.x renamed `get_sentence_embedding_dimension` to
   `get_embedding_dimension`; the minimum version is pinned to 5.0 and the
   protocol uses the current name (Task 5).
+- Reprocessing a failed upload first tried to create a second document row,
+  which the `(file hash, purpose)` unique constraint forbids. Failed documents
+  are now retried in place (Task 6).
+- Coverage under-reported every route handler — 64% for `upload.py` — because
+  SQLAlchemy's async layer switches greenlets and loses the tracer. Adding
+  `concurrency = ["thread", "greenlet"]` to the coverage config reported the
+  true 99% (Task 6).
+- PostgreSQL's `now()` is the transaction start time, so rows written in one
+  transaction share a `created_at`. Only affects tests; each real upload has
+  its own transaction (Task 6).
 
 ### Decisions
 
@@ -124,3 +146,5 @@ Recorded in [decisions.md](decisions.md):
 - Chunk sizing as code constants tied to `CHUNKER_VERSION`
 - Embedding model as a constant, validated against the schema at load
 - Chunk writes centralized in `vector_store`, replacing rather than appending
+- Duplicate uploads reused, failed ones retried in place
+- Ingestion progress committed per stage so polling is meaningful

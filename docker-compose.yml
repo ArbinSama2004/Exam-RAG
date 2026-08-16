@@ -31,6 +31,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-examrag}
       POSTGRES_DB: ${POSTGRES_DB:-examrag}
       UPLOAD_DIR: /data/uploads
+      MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-50}
       # Cache the embedding model on a volume so it downloads once.
       HF_HOME: /data/models
     command: >

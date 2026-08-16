@@ -25,11 +25,11 @@ state in PostgreSQL.
 | ------ | -------------- | ------ |
 | `main.py` | Application factory: settings, logging, CORS, routers, lifespan | Implemented |
 | `config.py` | Environment-driven settings, database URL construction | Implemented |
-| `api/` | HTTP routers; thin, delegating to services | `health.py` implemented |
+| `api/` | HTTP routers; thin, delegating to services | `health.py`, `upload.py` implemented |
 | `database/` | Async engine, session factory, ORM models, chunk/vector storage | Implemented |
 | `enums.py` | Domain enumerations shared by models, schemas and API | Implemented |
-| `schemas/` | Pydantic request/response models | `health.py` implemented |
-| `ingestion/` | Loading, Markdown normalization, cleaning, chunking | Implemented through chunking |
+| `schemas/` | Pydantic request/response models | `health.py`, `document.py` implemented |
+| `ingestion/` | Loading, normalization, cleaning, chunking, file storage, pipeline | Implemented |
 | `embeddings/` | Embedding generation | Implemented |
 | `retrieval/` | `base`, `vector_search`, `keyword_search`, `fusion`, `reranker` | Phase 2 |
 | `rag/` | Orchestration: pipeline and context building | Phase 2 |
@@ -161,6 +161,57 @@ rules that make a document retrievable live in one place:
 
 The caller owns the transaction. Retrieval reads belong to the `retrieval`
 package and arrive in Phase 2.
+
+## Upload and ingestion
+
+```text
+POST /documents ─► validate ─► hash ─► store file ─► Document + IngestionJob ─► 202
+                                                              │
+                                            BackgroundTasks ──┘
+                                                              ▼
+                        load → clean → chunk → embed → index → READY
+                                                              │
+GET /documents/{id}/status ◄───── polled by the frontend ─────┘
+```
+
+| Endpoint | Purpose |
+| -------- | ------- |
+| `POST /documents` | Upload a file with its purpose. Returns `202` with the document and job id. |
+| `GET /documents` | List documents, newest first, optionally filtered by purpose. |
+| `GET /documents/{id}` | One document, including the model and chunker that produced its chunks. |
+| `GET /documents/{id}/status` | Current status and stage. This is the polling endpoint. |
+
+The route handler validates, decides whether the upload is a duplicate, and
+hands the work to a background task. It runs no pipeline logic itself.
+
+Validation rejects unsupported extensions (`400`), empty files (`400`) and
+uploads over `MAX_UPLOAD_MB` (`413`).
+
+### Background processing
+
+`ingestion_pipeline.process_document` opens its own session, because the
+request's session is closed once the response is sent. The task is queued only
+after the upload transaction commits, so it cannot look for a row that has not
+been written.
+
+Each stage is committed as it starts, which is what makes the status endpoint
+useful — a poller sees `CHUNKING` while chunking is happening, not a single
+jump from `UPLOADED` to `READY`. Failures are recorded as `FAILED` with the
+exception type and message rather than raised: a background task has nobody to
+raise to, and the frontend polls for exactly this.
+
+### Duplicate protection
+
+An upload is hashed before anything else is stored. If a document already
+exists with that `(file hash, purpose)`:
+
+- it is **reused** — returned as-is with `reused: true`, generating no
+  embeddings — unless its last ingestion failed;
+- a **failed** document is **retried in place**: the file is written again, the
+  status resets to `UPLOADED` and a new job is queued. A second row is
+  impossible anyway, since `(original_file_hash, purpose)` is unique, and
+  retrying in place keeps the document id the frontend already holds. Writing
+  the file again also recovers a document whose upload volume was cleared.
 
 ## Data model
 

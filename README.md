@@ -4,10 +4,9 @@ A local, single-user RAG application for exam preparation. Upload your study
 material and past question papers, then generate practice MCQs and discover the
 questions that keep coming back.
 
-> **Status:** Phase 1 Tasks 1–5 are complete: project foundation, the database
-> schema, document loading and normalization, cleaning and chunking, and
-> embedding generation with vector storage. The upload endpoint, retrieval, MCQ
-> generation and FAQ analysis are not implemented yet.
+> **Status:** Phase 1 Tasks 1–6 are complete. Documents can be uploaded through
+> the API and are ingested end to end into PostgreSQL + pgvector. The frontend
+> upload UI, retrieval, MCQ generation and FAQ analysis are not implemented yet.
 
 ## Features
 
@@ -66,6 +65,24 @@ Health:            http://localhost:8000/health
 `make up` builds the images, starts PostgreSQL with pgvector, applies the
 database migrations and starts the backend and frontend.
 
+## API
+
+| Endpoint | Purpose |
+| -------- | ------- |
+| `POST /documents` | Upload a PDF/DOCX/MD/TXT file with `purpose=STUDY_MATERIAL` or `PAST_PAPER`. Returns `202`. |
+| `GET /documents` | List documents, newest first. Add `?purpose=` to filter. |
+| `GET /documents/{id}` | One document and the model/chunker behind its chunks. |
+| `GET /documents/{id}/status` | Ingestion status and stage — poll until `READY` or `FAILED`. |
+| `GET /health`, `GET /health/ready` | Liveness and readiness. |
+
+Try it:
+
+```bash
+curl -X POST http://localhost:8000/documents -F "file=@notes.pdf" -F "purpose=STUDY_MATERIAL"
+```
+
+Full interactive documentation is at http://localhost:8000/docs.
+
 ## Environment variables
 
 All variables live in `.env` (copied from `.env.example`). The defaults work
@@ -80,6 +97,7 @@ out of the box; the ones you are most likely to change are:
 | `API_PORT` / `FRONTEND_PORT` | `8000` / `3000` | Host ports |
 | `POSTGRES_*` | `examrag` | Database credentials, name, host and port |
 | `UPLOAD_DIR` | `/data/uploads` | Upload path inside the container, bind-mounted to `./data/uploads` |
+| `MAX_UPLOAD_MB` | `50` | Largest accepted upload |
 | `VITE_API_BASE_URL` | `http://localhost:8000` | Backend URL used by the frontend |
 
 ## How to run

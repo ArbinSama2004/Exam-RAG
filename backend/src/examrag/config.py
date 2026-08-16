@@ -36,6 +36,7 @@ class Settings(BaseSettings):
     postgres_db: str = "examrag"
 
     upload_dir: Path = Path("/data/uploads")
+    max_upload_mb: int = 50
 
     @field_validator("cors_origins", mode="before")
     @classmethod

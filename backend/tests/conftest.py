@@ -1,14 +1,19 @@
 """Shared test fixtures."""
 
+import os
 from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
 
 import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 from examrag.config import get_settings
 from examrag.main import create_app
+
+DEFAULT_TEST_DATABASE_URL = "postgresql+asyncpg://examrag:examrag@localhost:5432/examrag"
 
 ENV_VARS = (
     "APP_ENV",
@@ -51,3 +56,48 @@ async def client(app: FastAPI) -> AsyncIterator[AsyncClient]:
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as http_client:
             yield http_client
+
+
+@pytest.fixture
+async def db_session() -> AsyncIterator[AsyncSession]:
+    """Session against a real database, inside a transaction that is rolled back.
+
+    Skipped when no database is reachable, so the rest of the suite still runs
+    without Docker. `join_transaction_mode="create_savepoint"` turns any commit
+    made by the code under test into a savepoint release, so code that commits
+    (the ingestion pipeline does, to publish progress) stays testable without
+    leaking rows into the developer's database.
+    """
+    url = os.environ.get("TEST_DATABASE_URL", DEFAULT_TEST_DATABASE_URL)
+    engine = create_async_engine(url, poolclass=None)
+    try:
+        connection = await engine.connect()
+    except (SQLAlchemyError, OSError) as exc:
+        await engine.dispose()
+        pytest.skip(f"No database available at {url}: {exc}")
+
+    transaction = await connection.begin()
+    session = AsyncSession(
+        bind=connection,
+        expire_on_commit=False,
+        join_transaction_mode="create_savepoint",
+    )
+    try:
+        yield session
+    finally:
+        await session.close()
+        if transaction.is_active:
+            await transaction.rollback()
+        await connection.close()
+        await engine.dispose()
+
+
+@pytest.fixture
+def uploads(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
+    """Point the upload directory at a temporary path for the duration of a test."""
+    directory = tmp_path / "uploads"
+    directory.mkdir()
+    monkeypatch.setenv("UPLOAD_DIR", str(directory))
+    get_settings.cache_clear()
+    yield directory
+    get_settings.cache_clear()

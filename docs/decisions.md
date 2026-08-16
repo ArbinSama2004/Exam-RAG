@@ -304,3 +304,41 @@ retrieval still returns, with the document claiming a model that did not
 produce them. One function makes that impossible to get wrong.
 
 **Date:** 2026-08-16
+
+---
+
+## A failed upload is retried in place, not duplicated
+
+**Decision:** Re-uploading a file that already exists for the same purpose
+returns the existing document untouched, unless its last ingestion failed — in
+which case the same document is reset to `UPLOADED`, its file is written again
+and a new ingestion job is queued.
+
+**Reason:** The first implementation created a new document row for a failed
+re-upload and immediately hit the `(original_file_hash, purpose)` unique
+constraint. The constraint is right, so the behaviour had to change. Retrying
+in place is also better: the frontend keeps the document id it is already
+polling, the failure history stays attached to the document through its jobs,
+and rewriting the file recovers a document whose upload volume was cleared.
+
+**Date:** 2026-08-16
+
+---
+
+## Ingestion commits after every stage
+
+**Decision:** `run_ingestion` commits the job's status and stage as each stage
+begins, rather than once at the end.
+
+**Reason:** The status endpoint exists so the frontend can show real progress.
+Committing only at the end would make every document jump from `UPLOADED`
+straight to `READY` or `FAILED`, and the specification's progress display —
+converting, chunking, embedding, indexing — would have nothing to show. It also
+means a backend that dies mid-run leaves a document visibly stuck in
+`PROCESSING` rather than silently lost.
+
+Failures are recorded rather than raised, since a background task has no caller
+to raise to. The pipeline rolls back first, so a half-finished run cannot leave
+chunks that retrieval would return.
+
+**Date:** 2026-08-16
