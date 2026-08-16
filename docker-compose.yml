@@ -31,6 +31,8 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-examrag}
       POSTGRES_DB: ${POSTGRES_DB:-examrag}
       UPLOAD_DIR: /data/uploads
+      # Cache the embedding model on a volume so it downloads once.
+      HF_HOME: /data/models
     command: >
       sh -c "alembic upgrade head &&
              uvicorn examrag.main:app --host 0.0.0.0 --port 8000 --reload"
@@ -41,6 +43,7 @@ services:
       - ./backend/alembic:/app/alembic
       - ./backend/tests:/app/tests
       - ./data/uploads:/data/uploads
+      - model_cache:/data/models
     depends_on:
       postgres:
         condition: service_healthy
@@ -61,3 +64,4 @@ services:
 
 volumes:
   postgres_data:
+  model_cache:

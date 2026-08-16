@@ -57,13 +57,25 @@ Task 4 — Markdown cleaning and chunking (2026-08-16)
 - [x] End-to-end composition test over a real PDF
 - [x] 47 new tests — 124 passing in total
 
+Task 5 — Embedding generation and vector storage (2026-08-16)
+
+- [x] `EmbeddingGenerator` over sentence-transformers, model loaded on first use
+- [x] `Encoder` protocol so tests never download a model
+- [x] L2-normalized 384-dimensional vectors, batched
+- [x] Model width validated against the schema at load; output shape per call
+- [x] `vector_store.replace_chunks` writes chunks and vectors as a set
+- [x] Provenance (`chunk_count`, `embedding_model`, `chunker_version`) recorded together
+- [x] Opt-in real-model test (`EXAMRAG_TEST_REAL_MODEL=1`)
+- [x] `model_cache` volume so the model downloads once
+- [x] CPU-only torch wheels on Linux: backend image 17.7 GB to 3.78 GB
+- [x] 24 new tests — 148 passing in total
+
 ### In Progress
 
-- [ ] Task 5 — embedding generation and vector storage
+- [ ] Task 6 — upload endpoint, ingestion jobs, background processing, duplicate protection
 
 ### Not Started
 
-- [ ] Task 6 — upload endpoint, ingestion jobs, background processing, duplicate protection
 - [ ] Task 7 — frontend upload UI and status polling
 
 ### Problems
@@ -87,6 +99,12 @@ Task 4 — Markdown cleaning and chunking (2026-08-16)
 - Header detection originally took the first and last two lines of each page,
   which overlap on a short page and deleted mid-page content. The slices are
   now capped so they can never meet (Task 4).
+- The default Linux torch wheels bundle CUDA, which made the backend image
+  17.7 GB. Declaring torch explicitly and pointing it at the CPU-only wheel
+  index for Linux brought it to 3.78 GB (Task 5).
+- sentence-transformers 5.x renamed `get_sentence_embedding_dimension` to
+  `get_embedding_dimension`; the minimum version is pinned to 5.0 and the
+  protocol uses the current name (Task 5).
 
 ### Decisions
 
@@ -104,3 +122,5 @@ Recorded in [decisions.md](decisions.md):
 - Heading inference from font metrics for PDF, explicit styles for DOCX
 - Structure-aware chunking with heading breadcrumbs
 - Chunk sizing as code constants tied to `CHUNKER_VERSION`
+- Embedding model as a constant, validated against the schema at load
+- Chunk writes centralized in `vector_store`, replacing rather than appending

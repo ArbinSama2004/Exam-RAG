@@ -238,3 +238,69 @@ boundaries: the converter reports what the PDF contains, the cleaner decides
 what is worth keeping.
 
 **Date:** 2026-08-16
+
+---
+
+## The embedding model is a constant, validated at load
+
+**Decision:** `EMBEDDING_MODEL_NAME` is a module constant, and the model's
+vector width is checked against `EMBEDDING_DIMENSIONS` when it loads.
+
+**Reason:** The model and the column width are one decision, not two. A model
+name in the environment would let someone point at a 768-dimensional model and
+discover the mismatch as an opaque insert failure at ingestion time, after
+conversion and chunking have already run. Keeping it in code means the pairing
+is reviewable, and the load-time check turns any future mismatch into a message
+that names the problem. `embedding_model` is still recorded per document, which
+is what makes a model change detectable in stored data.
+
+**Date:** 2026-08-16
+
+---
+
+## Embedding depends on a protocol, not on SentenceTransformer
+
+**Decision:** `EmbeddingGenerator` accepts any object satisfying an `Encoder`
+protocol, defaulting to a lazily constructed `SentenceTransformer`.
+
+**Reason:** Without it, every test touching embeddings would download and load a
+90 MB model, turning a two-second suite into a slow one and making it depend on
+network access. The protocol names the two methods actually used, so a fake is
+trivial. The real model is still exercised, by an opt-in test behind
+`EXAMRAG_TEST_REAL_MODEL=1`, so the integration is verified without taxing every
+run.
+
+**Date:** 2026-08-16
+
+---
+
+## Torch is installed from the CPU-only wheel index on Linux
+
+**Decision:** `torch` is declared explicitly and sourced from
+`https://download.pytorch.org/whl/cpu` for `sys_platform == 'linux'`.
+
+**Reason:** The default Linux wheels bundle CUDA. Measured: the backend image
+was 17.7 GB before the change and 3.78 GB after, for an application that runs
+embeddings on CPU on a single machine. Torch has to be a direct dependency for
+the source override to apply, since it arrives transitively through
+sentence-transformers. macOS wheels are already CPU/MPS, so the override is
+scoped to Linux and local development is unaffected.
+
+**Date:** 2026-08-16
+
+---
+
+## All chunk writes go through `vector_store`
+
+**Decision:** `database/vector_store.py` is the only module that writes to
+`chunks`, and `replace_chunks` replaces a document's chunks as a set rather
+than appending.
+
+**Reason:** Three things have to happen together for a document to be correctly
+retrievable: its old chunks must go, the new ones must be written, and
+`chunk_count`, `embedding_model` and `chunker_version` must be recorded. Split
+across callers, a re-ingestion that half-succeeds leaves orphaned chunks that
+retrieval still returns, with the document claiming a model that did not
+produce them. One function makes that impossible to get wrong.
+
+**Date:** 2026-08-16

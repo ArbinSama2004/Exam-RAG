@@ -15,6 +15,11 @@ dependencies = [
     "pgvector>=0.3.6",
     "pymupdf>=1.25.0",
     "python-docx>=1.1.2",
+    "sentence-transformers>=5.0.0",
+    # Declared explicitly so the CPU-only wheel index below applies to it;
+    # sentence-transformers would otherwise pull the CUDA build on Linux.
+    "torch>=2.5.0",
+    "numpy>=2.1.0",
 ]
 
 [project.optional-dependencies]
@@ -36,6 +41,17 @@ packages = ["src/examrag"]
 
 [tool.uv]
 default-groups = []
+
+# The application runs CPU-only, and the default Linux torch wheels bundle CUDA
+# — around 15 GB of it in the Docker image. macOS wheels are already CPU/MPS,
+# so the override is scoped to Linux.
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
 
 [tool.ruff]
 line-length = 100

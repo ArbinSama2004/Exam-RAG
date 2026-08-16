@@ -26,11 +26,11 @@ state in PostgreSQL.
 | `main.py` | Application factory: settings, logging, CORS, routers, lifespan | Implemented |
 | `config.py` | Environment-driven settings, database URL construction | Implemented |
 | `api/` | HTTP routers; thin, delegating to services | `health.py` implemented |
-| `database/` | Async engine, session factory, declarative `Base`, ORM models | Connection layer and models implemented |
+| `database/` | Async engine, session factory, ORM models, chunk/vector storage | Implemented |
 | `enums.py` | Domain enumerations shared by models, schemas and API | Implemented |
 | `schemas/` | Pydantic request/response models | `health.py` implemented |
 | `ingestion/` | Loading, Markdown normalization, cleaning, chunking | Implemented through chunking |
-| `embeddings/` | Embedding generation | Phase 1, later tasks |
+| `embeddings/` | Embedding generation | Implemented |
 | `retrieval/` | `base`, `vector_search`, `keyword_search`, `fusion`, `reranker` | Phase 2 |
 | `rag/` | Orchestration: pipeline and context building | Phase 2 |
 | `generation/` | LLM client, prompt building, MCQ and answer generation | Phase 2 |
@@ -120,6 +120,47 @@ heading breadcrumb — using structure rather than a fixed window:
 `CHUNKER_VERSION` identifies the strategy and is stored per document, so chunks
 produced by an older version stay detectable. It must be bumped whenever the
 algorithm or any of its size constants change.
+
+## Embeddings
+
+`embeddings/embedding_generator.py` wraps sentence-transformers behind an
+`Encoder` protocol. One model serves both sides of retrieval — chunks at
+ingestion, queries at search time — because vectors from different models are
+not comparable.
+
+| Aspect | Choice |
+| ------ | ------ |
+| Model | `sentence-transformers/all-MiniLM-L6-v2`, 384 dimensions |
+| Loading | Deferred to first use; a fresh install downloads the model |
+| Normalization | L2, so cosine distance in pgvector is a dot product |
+| Batching | 32 texts per forward pass |
+| Safety | The model's width is checked against `EMBEDDING_DIMENSIONS` at load, and the output shape is checked per call |
+
+Depending on a protocol rather than the concrete class keeps the test suite free
+of a model download; the real model is covered by an opt-in test
+(`EXAMRAG_TEST_REAL_MODEL=1`).
+
+In Docker the model is cached on the `model_cache` volume, so it downloads once
+rather than on every container start. Torch is installed from the CPU-only
+wheel index on Linux — the default wheels bundle CUDA and made the backend
+image 17.7 GB instead of 3.8 GB.
+
+## Vector storage
+
+`database/vector_store.py` is the only module that writes to `chunks`, so the
+rules that make a document retrievable live in one place:
+
+- `replace_chunks` writes a document's chunks and vectors as a set, deleting any
+  it already had. Replacing rather than appending means re-ingestion cannot
+  leave orphaned chunks that retrieval would still return.
+- It records `chunk_count`, `embedding_model` and `chunker_version` on the
+  document in the same call, so a document always states what produced its
+  vectors.
+- `count_embedded_chunks` distinguishes chunks that carry a vector from those
+  that do not, since a chunk without one is invisible to vector search.
+
+The caller owns the transaction. Retrieval reads belong to the `retrieval`
+package and arrive in Phase 2.
 
 ## Data model
 

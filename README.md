@@ -4,10 +4,10 @@ A local, single-user RAG application for exam preparation. Upload your study
 material and past question papers, then generate practice MCQs and discover the
 questions that keep coming back.
 
-> **Status:** Phase 1 Tasks 1–4 are complete: project foundation, the database
-> schema, document loading with normalization into Markdown, and cleaning plus
-> chunking. Embeddings, the upload endpoint, retrieval, MCQ generation and FAQ
-> analysis are not implemented yet.
+> **Status:** Phase 1 Tasks 1–5 are complete: project foundation, the database
+> schema, document loading and normalization, cleaning and chunking, and
+> embedding generation with vector storage. The upload endpoint, retrieval, MCQ
+> generation and FAQ analysis are not implemented yet.
 
 ## Features
 
@@ -34,6 +34,7 @@ See [docs/architecture.md](docs/architecture.md) for detail.
 | -------- | ---------- |
 | Backend  | Python 3.12, FastAPI, Uvicorn, Pydantic v2, SQLAlchemy 2 (async), Alembic |
 | Documents | PyMuPDF (PDF), python-docx (DOCX) |
+| Embeddings | sentence-transformers (`all-MiniLM-L6-v2`, 384-d), PyTorch CPU |
 | Database | PostgreSQL 17 with pgvector |
 | Frontend | React, TypeScript, Vite, TanStack Query |
 | Tooling  | uv, pytest, Ruff, mypy, Docker Compose, Make |
@@ -113,6 +114,12 @@ Tests that need PostgreSQL are skipped automatically when no database is
 reachable, so `make test` works without Docker. Run `make up` first to include
 them. Override the connection with `TEST_DATABASE_URL` if needed.
 
+The suite never downloads the embedding model. To exercise the real one:
+
+```bash
+cd backend && EXAMRAG_TEST_REAL_MODEL=1 uv run pytest tests/embeddings
+```
+
 ## Project structure
 
 ```text
@@ -146,3 +153,6 @@ Progress is tracked in [docs/progress.md](docs/progress.md).
   multi-tenancy.
 - Ingestion runs in FastAPI background tasks. If the backend stops mid-job, that
   job must be re-uploaded.
+- The first upload downloads the embedding model (about 90 MB). It is cached on
+  the `model_cache` volume afterwards.
+- Embeddings run on CPU. The backend image is around 3.8 GB, most of it PyTorch.
